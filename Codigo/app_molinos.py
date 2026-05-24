@@ -55,8 +55,10 @@ render_encabezado()
 # ── Logo corporativo en header: reemplaza el engranaje ⚙️ por la imagen ──────
 # Inyección CSS pura sobre .corp-header-logo sin tocar interfaz_estilos.py.
 import base64 as _b64, pathlib as _pl
+_BASE_DIR   = _pl.Path(__file__).resolve().parent
+_ASSETS_DIR = _BASE_DIR / "assets"
 try:
-    _logo_hdr_bytes = _pl.Path("assets/logo_molinos.jfif").read_bytes()
+    _logo_hdr_bytes = (_ASSETS_DIR / "logo_molinos.jfif").read_bytes()
     _logo_hdr_b64   = _b64.b64encode(_logo_hdr_bytes).decode()
     _logo_hdr_src   = f"data:image/jpeg;base64,{_logo_hdr_b64}"
     st.markdown(f"""
@@ -188,7 +190,7 @@ if st.session_state["modo_carga"] is None:
     # ── Columna izquierda: UNA SOLA imagen via st.image (sin duplicado HTML) ──
     with _col_img:
         try:
-            st.image("assets/molino_inicio.jfif", use_container_width=True)
+            st.image(str(_ASSETS_DIR / "molino_inicio.jfif"), use_container_width=True)
         except Exception:
             st.markdown(
                 '<div style="height:520px;background:#D5D8DC;border-radius:12px;'
