@@ -233,47 +233,57 @@ if st.session_state["modo_carga"] is None:
 
     st.stop()
 
-# ── Botón para cambiar de modo ────────────────────────────────────────────────
-_modo_label = "📂 Excel" if st.session_state["modo_carga"] == "excel" else "✍️ Manual"
-if st.button(f"↩ Cambiar método de carga ({_modo_label})", key="btn_cambiar_modo"):
-    st.session_state["modo_carga"]    = None
-    st.session_state["df_manual_ok"]  = False
-    st.session_state["df_manual_raw"] = None
-    st.rerun()
+# ── Página activa temprana (antes del router; sidebar aún no se ha renderizado) ──
+_pagina_ahora = st.session_state.get("pagina", "capacidad")
+
+# ── Botón para cambiar de modo (solo en Capacidad) ────────────────────────────
+if _pagina_ahora == "capacidad":
+    _modo_label = "📂 Excel" if st.session_state["modo_carga"] == "excel" else "✍️ Manual"
+    if st.button(f"↩ Cambiar método de carga ({_modo_label})", key="btn_cambiar_modo"):
+        st.session_state["modo_carga"]    = None
+        st.session_state["df_manual_ok"]  = False
+        st.session_state["df_manual_raw"] = None
+        st.session_state.pop("df_excel_raw", None)
+        st.rerun()
 
 # =============================================================================
 # RAMA A — EXCEL (flujo original intacto)
 # =============================================================================
 if st.session_state["modo_carga"] == "excel":
-    sample_bytes = generate_sample_excel()
-    upc, dlc = st.columns([4, 1])
-    with upc:
-        uploaded = st.file_uploader(
-            "📂 Cargar archivo Excel con datos de muestreo (.xlsx)",
-            type=["xlsx", "xls"],
-            help="Columnas obligatorias: X1, X2, ..., Xn (n entre 2 y 10). Opcionales: Subgrupo, Hora."
-        )
-    with dlc:
-        st.markdown("<br>", unsafe_allow_html=True)
-        st.download_button(
-            "⬇ Plantilla", sample_bytes, "plantilla_CEP.xlsx",
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            width='stretch'
-        )
 
-    if uploaded is None:
-        st.markdown(render_alarm("info", (
-            "<strong>📋 Instrucciones de uso</strong><br><br>"
-            "1. Descarga la <strong>plantilla de ejemplo</strong> con el botón de arriba<br>"
+    uploaded = None
+
+    if _pagina_ahora == "capacidad":
+        sample_bytes = generate_sample_excel()
+        upc, dlc = st.columns([4, 1])
+        with upc:
+            uploaded = st.file_uploader(
+                "📂 Cargar archivo Excel con datos de muestreo (.xlsx)",
+                type=["xlsx", "xls"],
+                key="main_xl_uploader",
+                help="Columnas obligatorias: X1, X2, ..., Xn (n entre 2 y 10). Opcionales: Subgrupo, Hora."
+            )
+        with dlc:
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.download_button(
+                "⬇ Plantilla", sample_bytes, "plantilla_CEP.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                width='stretch'
+            )
+
+        if uploaded is None and "df_excel_raw" not in st.session_state:
+            st.markdown(render_alarm("info", (
+                "<strong>📋 Instrucciones de uso</strong><br><br>"
+                "1. Descarga la <strong>plantilla de ejemplo</strong> con el botón de arriba<br>"
             "2. Completa con los datos de pesaje de tu línea (columnas X1\u2026Xn)<br>"
             "3. Carga el archivo Excel con el botón de arriba<br>"
             "4. El sistema calculará automáticamente CEP, capacidad, potencia y economía<br><br>"
             "<strong>Límites activos:</strong> LIE = 39.5 kg · LSE = 40.5 kg · Nominal = 40.0 kg"
         )), unsafe_allow_html=True)
-        st.stop()
+            st.stop()
 
     _proc_ok = False
-    with st.container():
+    if uploaded is not None:
         try:
             df_raw = pd.read_excel(uploaded)
             _xcand = sorted(
@@ -291,27 +301,46 @@ if st.session_state["modo_carga"] == "excel":
                       if (str(c).strip().upper().startswith("X") and str(c).strip()[1:].isdigit())
                       or str(c).lower() in ("subgrupo", "hora", "fecha", "turno", "operario")]
             df_raw = df_raw[[c for c in df_raw.columns if c in _keep]]
-
             if len(df_raw) < 2:
                 st.warning("⚠ Se necesitan al menos 2 subgrupos completos. Revisa el archivo.")
                 st.stop()
-
+            st.session_state["df_excel_raw"] = df_raw.copy()
             n, x_cols = detect_subgroups(df_raw)
-            # Leer límites dinámicos del session_state si ya fueron configurados
-            # por el usuario; si no, usar los defaults del módulo.
             _dyn_lsl = st.session_state["cap_lsl"]
             _dyn_usl = st.session_state["cap_usl"]
             _dyn_nom = st.session_state["cap_nominal"]
-            issues    = validate_data(df_raw, x_cols, lsl=_dyn_lsl, usl=_dyn_usl)
-            s         = compute_spc(df_raw, x_cols, n,
-                                    lsl=_dyn_lsl, usl=_dyn_usl,
-                                    nominal=_dyn_nom)
-            _proc_ok  = True
+            issues   = validate_data(df_raw, x_cols, lsl=_dyn_lsl, usl=_dyn_usl)
+            s        = compute_spc(df_raw, x_cols, n,
+                                   lsl=_dyn_lsl, usl=_dyn_usl,
+                                   nominal=_dyn_nom)
+            _proc_ok = True
         except Exception as _e:
             st.error("❌ No se pudo procesar el archivo. Verifica que tenga columnas X1, X2,... con valores numéricos.")
             with st.expander("Ver detalle técnico"):
                 st.code(str(_e))
             st.stop()
+    elif "df_excel_raw" in st.session_state:
+        try:
+            df_raw = st.session_state["df_excel_raw"].copy()
+            n, x_cols = detect_subgroups(df_raw)
+            _dyn_lsl = st.session_state["cap_lsl"]
+            _dyn_usl = st.session_state["cap_usl"]
+            _dyn_nom = st.session_state["cap_nominal"]
+            issues   = validate_data(df_raw, x_cols, lsl=_dyn_lsl, usl=_dyn_usl)
+            s        = compute_spc(df_raw, x_cols, n,
+                                   lsl=_dyn_lsl, usl=_dyn_usl,
+                                   nominal=_dyn_nom)
+            _proc_ok = True
+        except Exception as _e:
+            st.error("❌ Error al recuperar datos. Vuelve a Capacidad y sube el archivo.")
+            with st.expander("Ver detalle técnico"):
+                st.code(str(_e))
+            st.stop()
+    else:
+        st.markdown(render_alarm("info",
+            "Para comenzar, ve a la página <strong>Capacidad</strong> y carga un archivo Excel."
+        ), unsafe_allow_html=True)
+        st.stop()
 
     if _proc_ok:
         for iss in issues:
@@ -431,28 +460,9 @@ st.session_state.setdefault("eco_p_rechazo", 0.10)
 if not _proc_ok:
     st.stop()
 
-# Los widgets de muestreo solo son relevantes en la página de Potencia/ARL.
-_pagina_usa_muestreo = st.session_state.get("pagina", "capacidad") in ("potencia",)
-if _pagina_usa_muestreo:
-    st.markdown(render_section_title("⚙️ Parámetros de Muestreo"), unsafe_allow_html=True)
-    c5, c6 = st.columns(2)
-    with c5:
-        n_proposed = st.number_input(
-            "n tamaño de muestra propuesto",
-            min_value=2, max_value=1000,
-            value=min(n + 1, 10), step=1,
-            key="input_n_proposed"
-        )
-    st.session_state["n_proposed_val"] = n_proposed
-    with c6:
-        freq_min = st.number_input(
-            "Frec. muestreo (min)", 1, value=20, key="input_freq_min"
-        )
-    st.session_state["freq_min_val"] = freq_min
-else:
-    # Valores por defecto silenciosos — los widgets no se renderizan
-    n_proposed = st.session_state.get("n_proposed_val", 5)
-    freq_min   = st.session_state.get("freq_min_val", 20)
+# Valores silenciosos — bloque de muestreo eliminado del flujo global
+n_proposed = st.session_state.get("n_proposed_val", 5)
+freq_min   = st.session_state.get("freq_min_val", 20)
 
 # KPIs globales — s está garantizado definido aquí
 # (El rendering de los KPIs de Capacidad se realiza dentro de page_capacidad()
@@ -558,8 +568,6 @@ def page_capacidad():
     #    (los widgets de modo_carga ya se renderizaron antes de entrar a esta
     #     función; aquí solo se ubica el separador visual para agruparlos)
     # ══════════════════════════════════════════════════════════════════════════
-    st.markdown(render_section_title("📥 Ingreso de Datos"), unsafe_allow_html=True)
-
     # ══════════════════════════════════════════════════════════════════════════
     # 3. ESPECIFICACIONES DEL PROCESO
     # ══════════════════════════════════════════════════════════════════════════
@@ -811,20 +819,13 @@ def page_capacidad():
         </table></div>""", unsafe_allow_html=True)
 
     # ══════════════════════════════════════════════════════════════════════════
-    # 7. KPIs FINALES — Cpk · % NC · Sobrellenado · Pérdida mensual
+    # 7. KPIs FINALES — Cpk · % NC · Sobrellenado
     # ══════════════════════════════════════════════════════════════════════════
     st.markdown("<br>", unsafe_allow_html=True)
-    _kpi_nominal_cap   = st.session_state["cap_nominal"]
-    _kpi_over_g_cap    = max(0.0, s_cap["xbar_bar"] - _kpi_nominal_cap) * 1000
-    _kpi_sacos_mes_cap = (st.session_state["eco_prod_h"]
-                          * st.session_state["eco_hours_day"]
-                          * st.session_state["eco_days_month"])
-    _kpi_over_kg_cap   = max(0.0, s_cap["xbar_bar"] - _kpi_nominal_cap) * _kpi_sacos_mes_cap
-    _kpi_costo_mes_cap = _kpi_over_kg_cap * st.session_state["eco_cost_kg"]
-    _kpi_costo_anio_cap= _kpi_costo_mes_cap * 12
-    _kpi_sacos_ext_cap = (_kpi_over_kg_cap * 12 / 40) if _kpi_over_g_cap > 0 else 0.0
+    _kpi_nominal_cap = st.session_state["cap_nominal"]
+    _kpi_over_g_cap  = max(0.0, s_cap["xbar_bar"] - _kpi_nominal_cap) * 1000
 
-    k1, k2, k3, k4 = st.columns(4)
+    k1, k2, k3 = st.columns(3)
 
     bord = "red" if _Cpk < 1.0 else "yellow" if _Cpk < 1.33 else "green"
     with k1:
@@ -848,14 +849,7 @@ def page_capacidad():
         st.markdown(f"""<div class="kpi-card {'yellow' if _kpi_over_g_cap > 0 else 'green'}">
         <div class="kpi-value" style="color:{CY if _kpi_over_g_cap > 0 else CG}">{_kpi_over_g_cap:+.1f} g</div>
         <div class="kpi-label">Sobrellenado promedio</div>
-        <div class="kpi-sub">x̄ = {s_cap['xbar_bar']:.4f} kg</div></div>""",
-        unsafe_allow_html=True)
-
-    with k4:
-        st.markdown(f"""<div class="kpi-card {'red' if _kpi_costo_mes_cap > 0 else 'green'}">
-        <div class="kpi-value" style="color:{CR if _kpi_costo_mes_cap > 0 else CG}">${_kpi_costo_mes_cap:,.0f}</div>
-        <div class="kpi-label">Pérdida mensual (COP)</div>
-        <div class="kpi-sub">${_kpi_costo_anio_cap:,.0f}/año · {_kpi_sacos_ext_cap:.0f} sacos extra</div></div>""",
+        <div class="kpi-sub">x̄ = {s_cap['xbar_bar']:.4f} kg &nbsp;·&nbsp; Ver costos en 💰 Análisis Económico</div></div>""",
         unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
@@ -870,6 +864,7 @@ def page_capacidad():
 def page_cartas_cep():
     global s, cpk_color, cpk_text, cpk_badge, freq_min, n_proposed
 
+    st.markdown(render_section_title("📈 Cartas de Control — Fase I"), unsafe_allow_html=True)
     ca, cb = st.columns(2)
     with ca:
         cls = "alarm-ok" if not s["signals_x"] else "alarm-critical"
@@ -953,38 +948,36 @@ def page_potencia():
     # ══════════════════════════════════════════════════════════════════════════
     # BLOQUE A — ANÁLISIS DE POTENCIA
     # ══════════════════════════════════════════════════════════════════════════
+    st.markdown("""<style>
+    button[data-testid="stNumberInputStepDown"],
+    button[data-testid="stNumberInputStepUp"] { display: none !important; }
+    </style>""", unsafe_allow_html=True)
+
     st.markdown("""
     <div style="background:linear-gradient(135deg,#1B4F72,#2E86C1);color:white;
          padding:1.1rem 1.5rem;border-radius:10px;margin-bottom:.8rem;">
     <h3 style="margin:0 0 .25rem;font-size:1.15rem;">🔬 Análisis de Potencia Estadística</h3>
     <p style="margin:0;opacity:.85;font-size:.82rem;">
-    Los campos azules se autollenan desde la Fase I. Solo debes ingresar la Nueva Media (μ₁).</p>
+    Parámetros pre-llenados desde Fase I. Puedes editarlos si necesitas ajustarlos.</p>
     </div>
     """, unsafe_allow_html=True)
 
     pot_col1, pot_col2 = st.columns([1, 1])
 
     with pot_col1:
-        st.markdown(render_section_title("📥 Parámetros de Fase I (automáticos)"),
-                    unsafe_allow_html=True)
         pa1, pa2 = st.columns(2)
         with pa1:
-            st.number_input("Media actual (μ₀)", value=float(f"{_mu0:.4f}"),
-                            format="%.4f", disabled=True, key="pot_mu0")
-            st.number_input("LCS", value=float(f"{_UCL:.4f}"),
-                            format="%.4f", disabled=True, key="pot_UCL")
+            _mu0 = st.number_input("Media actual (μ₀)", value=float(f"{_mu0:.4f}"),
+                            format="%.4f", step=0.0001, key="pot_mu0")
+            _UCL = st.number_input("LCS", value=float(f"{_UCL:.4f}"),
+                            format="%.4f", step=0.0001, key="pot_UCL")
         with pa2:
-            st.number_input("Sigma (σ)", value=float(f"{_sig:.6f}"),
-                            format="%.6f", disabled=True, key="pot_sig")
-            st.number_input("LCI", value=float(f"{_LCL:.4f}"),
-                            format="%.4f", disabled=True, key="pot_LCL")
-        pb1, pb2 = st.columns(2)
-        with pb1:
-            st.number_input("Tamaño de muestra (n)", value=int(_n),
-                            disabled=True, key="pot_n")
-        with pb2:
-            st.number_input("Nivel de confianza (%)", value=_conf,
-                            format="%.2f", disabled=True, key="pot_conf")
+            _sig = st.number_input("Sigma (σ)", value=float(f"{_sig:.6f}"),
+                            format="%.6f", step=0.000001, key="pot_sig")
+            _LCL = st.number_input("LCI", value=float(f"{_LCL:.4f}"),
+                            format="%.4f", step=0.0001, key="pot_LCL")
+        _n = st.number_input("Tamaño de muestra (n)", value=int(_n),
+                             min_value=2, max_value=1000, step=1, key="pot_n")
 
     with pot_col2:
         st.markdown(render_section_title("✏️ Parámetro manual"), unsafe_allow_html=True)
