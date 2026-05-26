@@ -340,9 +340,10 @@ else:
         _man_data = {"Subgrupo": list(range(1, int(_man_nsg)+1)),
                      "Hora":     [""] * int(_man_nsg)}
         for xc in _man_xcols:
-            _man_data[xc] = [None] * int(_man_nsg)
+            _man_data[xc] = [np.nan] * int(_man_nsg)
         st.session_state["man_df_edit"]   = pd.DataFrame(_man_data)
         st.session_state["man_table_key"] = _man_key
+        st.session_state.pop(f"man_editor_{_man_key}", None)
 
     # ── Tabla editable ────────────────────────────────────────────────────────
     st.markdown(f"**Ingresa los pesos (kg) — {int(_man_nsg)} subgrupos × n={int(_man_n)}:**")
@@ -354,12 +355,11 @@ else:
             "Subgrupo": st.column_config.NumberColumn("Subgrupo", disabled=True),
             "Hora":     st.column_config.TextColumn("Hora"),
             **{xc: st.column_config.NumberColumn(
-                xc, min_value=35.0, max_value=45.0, format="%.4f", step=0.001)
+                xc, format="%.3f", step=0.001)
                for xc in _man_xcols}
         },
         key=f"man_editor_{_man_key}"
     )
-    st.session_state["man_df_edit"] = _man_edited
 
     # ── Botón guardar ─────────────────────────────────────────────────────────
     if st.button("💾 Guardar datos iniciales", type="primary", key="btn_man_guardar"):
@@ -377,7 +377,6 @@ else:
             _df_save = _df_save.dropna(subset=_man_xcols, how="any").reset_index(drop=True)
             st.session_state["df_manual_raw"] = _df_save
             st.session_state["df_manual_ok"]  = True
-            st.rerun()
 
     if not st.session_state["df_manual_ok"]:
         st.markdown(render_alarm("info", (
@@ -1269,13 +1268,15 @@ def page_monitoreo():
         data  = {"Subgrupo": list(range(1, n_sg + 1)), "Hora": [""]*n_sg}
         for xc in xcols:
             data[xc] = [float("nan")]*n_sg
+        st.session_state["mon_bloque_counter"] = (
+            st.session_state.get("mon_bloque_counter", 0) + 1
+        )
         return {
+            "bid":         st.session_state["mon_bloque_counter"],
             "n":           n_muestra,
             "n_sg":        n_sg,
             "df":          pd.DataFrame(data),
             "hash":        "",
-            "fig_x":       None,
-            "fig_r":       None,
             "new_signals":   [],
             "new_r_signals": [],
             "idx_new":     [],
@@ -1283,6 +1284,8 @@ def page_monitoreo():
             "n_new":       0,
             "n_hist":      0,
         }
+
+    st.session_state.setdefault("mon_bloque_counter", 0)
 
     if "mon_n_fijo" not in st.session_state:
         st.session_state["mon_n_fijo"] = n_fijo
@@ -1340,6 +1343,12 @@ def page_monitoreo():
     _bi = st.session_state["mon_bloque_activo"]
     _bloques = st.session_state["mon_bloques"]
 
+    # Migración: asignar bid a bloques creados antes de esta versión
+    for _mbk in _bloques:
+        if "bid" not in _mbk:
+            st.session_state["mon_bloque_counter"] += 1
+            _mbk["bid"] = st.session_state["mon_bloque_counter"]
+
     # x_cols_mon → columnas del bloque activo
     x_cols_mon = [f"X{i+1}" for i in range(_bloques[_bi]["n"])]
 
@@ -1391,30 +1400,32 @@ def page_monitoreo():
         </div>
         """, unsafe_allow_html=True)
 
-        _mc1, _mc2, _mc3, _mc4 = st.columns([2.2, 1.2, 1.2, 1.8])
-        with _mc1:
-            st.text_input(
-                "👤 Operador / Responsable",
-                placeholder="Nombre del operador...",
-                key="mon_meta_operador",
-            )
-        with _mc2:
-            st.selectbox(
-                "🕐 Turno",
-                options=["Mañana", "Tarde", "Noche"],
-                key="mon_meta_turno",
-            )
-        with _mc3:
-            st.date_input(
-                "📅 Fecha",
-                key="mon_meta_fecha",
-            )
-        with _mc4:
-            st.text_input(
-                "🏷️ Línea / Lote",
-                placeholder="Ej: L-042 / Lote 2025-05",
-                key="mon_meta_lote",
-            )
+        with st.form("_form_meta_turno", border=False):
+            _mc1, _mc2, _mc3, _mc4 = st.columns([2.2, 1.2, 1.2, 1.8])
+            with _mc1:
+                st.text_input(
+                    "👤 Operador / Responsable",
+                    placeholder="Nombre del operador...",
+                    key="mon_meta_operador",
+                )
+            with _mc2:
+                st.selectbox(
+                    "🕐 Turno",
+                    options=["Mañana", "Tarde", "Noche"],
+                    key="mon_meta_turno",
+                )
+            with _mc3:
+                st.date_input(
+                    "📅 Fecha",
+                    key="mon_meta_fecha",
+                )
+            with _mc4:
+                st.text_input(
+                    "🏷️ Línea / Lote",
+                    placeholder="Ej: L-042 / Lote 2025-05",
+                    key="mon_meta_lote",
+                )
+            st.form_submit_button("✓ Confirmar turno")
 
         with st.expander("💬 Observaciones del turno (opcional)"):
             st.text_area(
@@ -1499,8 +1510,8 @@ def page_monitoreo():
 
     with _tab_manual:
         with st.container():
-            # KEY DINÁMICA: incluye índice de bloque para evitar colisión de keys
-            _mon_editor_key = f"mon_editor_b{_bi}_{_bloque_actual['n']}_{_bloque_actual['n_sg']}"
+            # KEY DINÁMICA: usa bid (identidad persistente) para evitar colisión entre bloques
+            _mon_editor_key = f"mon_editor_b{_bloque_actual['bid']}_{_bloque_actual['n']}_{_bloque_actual['n_sg']}"
 
             _df_para_editor = _bloque_actual["df"]
 
@@ -1513,14 +1524,12 @@ def page_monitoreo():
                     "Subgrupo": st.column_config.NumberColumn("Subgrupo", disabled=True),
                     "Hora":     st.column_config.TextColumn("Hora"),
                     **{xc: st.column_config.NumberColumn(
-                        xc, min_value=35.0, max_value=45.0, format="%.2f", step=0.1)
+                        xc, format="%.2f", step=0.1)
                        for xc in x_cols_mon}
                 },
                 key=_mon_editor_key
             )
-            # Persistir siempre el retorno — en el mismo render y en session_state del bloque
-            _bloque_actual["df"] = mon_edited
-            st.session_state["mon_bloques"][_bi]["df"] = mon_edited
+            st.session_state[f"_mon_data_{_bloque_actual['bid']}"] = mon_edited
 
             btn_col1, btn_col2 = st.columns([1, 1])
             with btn_col1:
@@ -1528,19 +1537,19 @@ def page_monitoreo():
                     empty_mon = {"Subgrupo": list(range(1, _bloque_actual["n_sg"]+1)),
                                  "Hora":     [""]*_bloque_actual["n_sg"]}
                     for xc in x_cols_mon:
-                        empty_mon[xc] = [None]*_bloque_actual["n_sg"]
+                        empty_mon[xc] = [float("nan")]*_bloque_actual["n_sg"]
                     _df_vacio = pd.DataFrame(empty_mon)
                     _bloque_actual["df"]   = _df_vacio
                     _bloque_actual["hash"] = ""
                     st.session_state["mon_bloques"][_bi]["df"]   = _df_vacio
                     st.session_state["mon_bloques"][_bi]["hash"] = ""
-                    # Limpiar el estado del data_editor para que re-dibuje desde cero
+                    st.session_state.pop(f"_mon_data_{_bloque_actual['bid']}", None)
                     if _mon_editor_key in st.session_state:
                         del st.session_state[_mon_editor_key]
                     st.rerun()
 
             with btn_col2:
-                _df_export = _bloque_actual["df"].copy()
+                _df_export = mon_edited.copy()
                 _xm_export = [c for c in _df_export.columns
                               if str(c).strip().upper().startswith("X")
                               and str(c).strip()[1:].isdigit()]
@@ -1606,7 +1615,9 @@ def page_monitoreo():
 
                         if st.button("✅ Usar estos datos", key="btn_mon_usar_excel"):
                             _bloque_actual["df"]   = _mon_xl_clean.reset_index(drop=True)
-                            _bloque_actual["hash"] = ""   # invalida hash anterior
+                            _bloque_actual["hash"] = ""
+                            st.session_state.pop(f"_mon_data_{_bloque_actual['bid']}", None)
+                            st.session_state.pop(_mon_editor_key, None)
                 except Exception as _xl_err:
                     st.error("❌ No se pudo leer el archivo. Verifica que contenga datos numéricos válidos.")
                     with st.expander("Ver detalle técnico"):
@@ -1663,10 +1674,14 @@ def page_monitoreo():
             help=("Elimina el bloque activo" if _puede_eliminar
                   else "No se puede eliminar el único bloque existente"),
         ):
+            _del_bid        = _bloques[_bi]["bid"]
+            _del_editor_key = f"mon_editor_b{_del_bid}_{_bloques[_bi]['n']}_{_bloques[_bi]['n_sg']}"
             _bloques.pop(_bi)
             new_bi = min(_bi, len(_bloques) - 1)
             st.session_state["mon_bloques"]       = _bloques
             st.session_state["mon_bloque_activo"] = new_bi
+            st.session_state.pop(f"_mon_data_{_del_bid}", None)
+            st.session_state.pop(_del_editor_key, None)
             st.session_state.pop("mon_hash_global", None)
             st.rerun()
 
@@ -1677,7 +1692,7 @@ def page_monitoreo():
 
     for _bk_idx, _bk in enumerate(_bloques):
         _bk_xcols = [f"X{i+1}" for i in range(_bk["n"])]
-        _bk_raw   = _bk["df"].copy()
+        _bk_raw   = st.session_state.get(f"_mon_data_{_bk['bid']}", _bk["df"]).copy()
         _bk_raw[_bk_xcols] = _bk_raw[[c for c in _bk_xcols if c in _bk_raw.columns]].apply(
             pd.to_numeric, errors="coerce"
         )
@@ -1694,10 +1709,6 @@ def page_monitoreo():
         else:
             _bk["_df_proc"] = None
 
-    # El bloque activo también actualiza df_nuevos para la sección de resumen
-    df_nuevos = _bloques[_bi].get("_df_proc")
-    df_mon_raw = _bloque_actual["df"].copy()
-
     # Avisar si el bloque activo aún no tiene suficientes datos
     if not _estructura_cambio and not _cualquier_dato:
         st.warning("⚠ Se requieren al menos 2 subgrupos con datos para graficar. "
@@ -1713,11 +1724,9 @@ def page_monitoreo():
     if not _estructura_cambio and _cualquier_dato:
         nuevo_hash = hashlib.md5(_global_hash_src.encode()).hexdigest()
 
-        # Usar una clave única por bloque activo para las figuras cacheadas
-        _fig_hash_key = f"mon_hash_global"
-        if nuevo_hash != st.session_state.get(_fig_hash_key, ""):
-            # Datos cambiaron — reconstruir figuras concatenando todos los bloques
-            st.session_state[_fig_hash_key] = nuevo_hash
+        # Hash global sobre todos los bloques: reconstruir figuras si cambia cualquier bloque
+        if nuevo_hash != st.session_state.get("mon_hash_global", ""):
+            st.session_state["mon_hash_global"] = nuevo_hash
 
             n_hist   = len(s["df"]); df_hist = s["df"].copy()
             idx_hist = list(range(1, n_hist+1))
@@ -1737,24 +1746,25 @@ def page_monitoreo():
                 _bk_len  = len(_bk_proc)
                 _bk_idx_new = list(range(_cursor, _cursor + _bk_len))
 
-                # ── Límites propios del bloque según su n ──────────────────────
+                # ── Límites derivados de Fase I ajustados al n de este bloque ──
+                # UCL/LCL se fijan desde σ̂ Fase I; no se recalculan desde datos Fase II.
+                # Para n_bk == n_fijo colapsa exactamente a UCL_fijo / LCL_fijo.
                 _bk_xbar_list = list(_bk_proc["xbar"])
                 _bk_R_list    = list(_bk_proc["R"])
-                _bk_xbar_bar  = float(np.mean(_bk_xbar_list))
-                _bk_R_bar     = float(np.mean(_bk_R_list))
                 _bk_cc        = CONTROL_CONSTANTS.get(_bk_n, CONTROL_CONSTANTS[min(CONTROL_CONSTANTS.keys(), key=lambda k: abs(k-_bk_n))])
-                _bk_UCL       = _bk_xbar_bar + _bk_cc["A2"] * _bk_R_bar
-                _bk_LCL       = _bk_xbar_bar - _bk_cc["A2"] * _bk_R_bar
-                _bk_UCLr      = _bk_cc["D4"] * _bk_R_bar
-                _bk_LCLr      = _bk_cc["D3"] * _bk_R_bar
+                _bk_R_ref     = sig_fijo * _bk_cc["d2"]   # R̄ esperado para n_bk desde σ̂ Fase I
+                _bk_UCL       = CL_fijo + _bk_cc["A2"] * _bk_R_ref
+                _bk_LCL       = CL_fijo - _bk_cc["A2"] * _bk_R_ref
+                _bk_UCLr      = _bk_cc["D4"] * _bk_R_ref
+                _bk_LCLr      = _bk_cc["D3"] * _bk_R_ref
 
                 _all_xbar    += _bk_xbar_list
                 _all_R       += _bk_R_list
                 _all_idx_new += _bk_idx_new
                 _bloque_boundaries.append((
                     _cursor, _cursor + _bk_len - 1, _bk_idx + 1,
-                    _bk_UCL, _bk_LCL, _bk_xbar_bar,
-                    _bk_UCLr, _bk_LCLr, _bk_R_bar, _bk_n
+                    _bk_UCL, _bk_LCL, CL_fijo,
+                    _bk_UCLr, _bk_LCLr, _bk_R_ref, _bk_n
                 ))
                 _cursor += _bk_len
 
