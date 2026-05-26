@@ -1524,7 +1524,7 @@ def page_monitoreo():
                     "Subgrupo": st.column_config.NumberColumn("Subgrupo", disabled=True),
                     "Hora":     st.column_config.TextColumn("Hora"),
                     **{xc: st.column_config.NumberColumn(
-                        xc, format="%.2f", step=0.1)
+                        xc, format="%.4f", step=0.001)
                        for xc in x_cols_mon}
                 },
                 key=_mon_editor_key
@@ -1974,14 +1974,13 @@ def page_monitoreo():
                     x=n_hist+0.5, y=y, text=f" {lbl}", showarrow=False,
                     xanchor="left", font=dict(size=9, color=col_ln),
                     bgcolor="rgba(255,255,255,.7)")
-            if LCLr_fijo > 0:
-                fig_mon_r.add_shape(type="line",
-                    x0=0.5, x1=n_hist+0.5, y0=LCLr_fijo, y1=LCLr_fijo,
-                    line=dict(color=_LIM_COLOR, dash="dash", width=1.8))
-                fig_mon_r.add_annotation(
-                    x=n_hist+0.5, y=LCLr_fijo, text=f" LCI₀={LCLr_fijo:.3f}",
-                    showarrow=False, xanchor="left", font=dict(size=9, color=_LIM_COLOR),
-                    bgcolor="rgba(255,255,255,.7)")
+            fig_mon_r.add_shape(type="line",
+                x0=0.5, x1=n_hist+0.5, y0=LCLr_fijo, y1=LCLr_fijo,
+                line=dict(color=_LIM_COLOR, dash="dash", width=1.8))
+            fig_mon_r.add_annotation(
+                x=n_hist+0.5, y=LCLr_fijo, text=f" LCI₀={LCLr_fijo:.3f}",
+                showarrow=False, xanchor="left", font=dict(size=9, color=_LIM_COLOR),
+                bgcolor="rgba(255,255,255,.7)")
 
             fig_mon_r.add_vline(x=n_hist+0.5, line_dash="dot", line_color="#7F8C8D",
                                 line_width=1.4)
@@ -2002,10 +2001,15 @@ def page_monitoreo():
                         x=_seg_x1_r, y=y, text=f" {lbl}", showarrow=False,
                         xanchor="left", font=dict(size=9, color=col_ln),
                         bgcolor="rgba(255,255,255,.7)")
-                if _bk_LCLr > 0:
-                    fig_mon_r.add_shape(type="line",
-                        x0=_prev_right_r, x1=_seg_x1_r, y0=_bk_LCLr, y1=_bk_LCLr,
-                        line=dict(color=_LIM_COLOR, dash="dash", width=1.8))
+                fig_mon_r.add_shape(type="line",
+                    x0=_prev_right_r, x1=_seg_x1_r, y0=_bk_LCLr, y1=_bk_LCLr,
+                    line=dict(color=_LIM_COLOR, dash="dash", width=1.8))
+                fig_mon_r.add_annotation(
+                    x=_seg_x1_r, y=_bk_LCLr,
+                    text=f" LCI{_bnd_num}={_bk_LCLr:.3f}",
+                    showarrow=False, xanchor="left",
+                    font=dict(size=9, color=_LIM_COLOR),
+                    bgcolor="rgba(255,255,255,.7)")
                 if _bnd_num > 1:
                     fig_mon_r.add_vline(x=_prev_right_r, line_dash="dot",
                                         line_color="#8E44AD", line_width=1.2,
@@ -2060,6 +2064,14 @@ def page_monitoreo():
                     )
                 ))
 
+            # Rango Y carta R: margen negativo para que LCLr=0 quede visible sobre el eje
+            _r_all_vals = (list(df_hist["R"]) + _all_R
+                           + [UCLr_fijo]
+                           + [_bnd[6] for _bnd in _bloque_boundaries])
+            _r_ymax = max((v for v in _r_all_vals if not np.isnan(v)), default=UCLr_fijo)
+            _r_ymax = max(_r_ymax, UCLr_fijo) * 1.12
+            _r_y_lo = -0.15 * _r_ymax
+
             fig_mon_r.update_layout(
                 template="plotly_white", height=310,
                 plot_bgcolor="white", paper_bgcolor="white",
@@ -2077,7 +2089,8 @@ def page_monitoreo():
                     title=dict(text="Rango R (kg)", font=dict(size=11)),
                     tickfont=dict(size=10), tickformat=".4f",
                     gridcolor="#EEF3F8", gridwidth=1, zeroline=False,
-                    linecolor="#DDE5ED", linewidth=1, rangemode="tozero",
+                    linecolor="#DDE5ED", linewidth=1,
+                    range=[_r_y_lo, _r_ymax],
                 ),
                 legend=dict(orientation="h", y=1.12, x=0,
                             font=dict(size=10), bgcolor="rgba(255,255,255,0)"),
