@@ -349,7 +349,7 @@ def fig_xbar(s):
     n_hit = sum(1 for r in s.get("sens_rules", []) if r["hits"])
     fig.update_layout(**_base_layout(
         height = 360,
-        title  = dict(text=f"Carta X̄  —  Reglas activas: {n_hit} / 8"),
+        title  = dict(text="Carta X̄"),
         xaxis  = dict(title="N° Subgrupo", tickmode="linear", tick0=1, dtick=1),
         yaxis  = dict(title="Peso promedio x̄ (kg)", tickformat=".4f"),
         margin = dict(l=52, r=128, t=68, b=48),
