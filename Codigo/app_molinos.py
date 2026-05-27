@@ -499,6 +499,9 @@ _PAGES = {
         ("⚡ Potencia",       "potencia"),
         ("🔴 Monitoreo",      "monitoreo"),
     ],
+    "📦 MUESTREO": [
+        ("📦 Planes de Muestreo", "muestreo"),
+    ],
     "💰 ANÁLISIS ECONÓMICO": [
         ("💰 Análisis Económico", "eco_analisis"),
     ],
@@ -3001,6 +3004,361 @@ def page_eco_analisis():
 # ROUTER — muestra la sección activa
 # ─────────────────────────────────────────────────────────────────────────────
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# MÓDULO: MUESTREO POR VARIABLES
+# ══════════════════════════════════════════════════════════════════════════════
+def page_muestreo():
+    import math
+    from scipy.stats import norm
+    import numpy as np
+    import plotly.graph_objects as go
+    import pandas as pd
+
+    CG = "#27AE60"; CY = "#F39C12"; CR = "#E74C3C"; CB = "#2980B9"
+
+    st.markdown("""
+    <style>
+    .ms-section{background:linear-gradient(135deg,#1B4F72,#154360);color:white;
+        padding:1.1rem 1.4rem;border-radius:12px;margin-bottom:1.2rem;
+        font-size:1.05rem;font-weight:700}
+    .ms-info{background:#EBF5FB;border-left:4px solid #2980B9;padding:.9rem 1.1rem;
+        border-radius:8px;margin-bottom:1rem;font-size:.88rem}
+    .ms-warn{background:#FEF9E7;border-left:4px solid #F39C12;padding:.9rem 1.1rem;
+        border-radius:8px;margin-bottom:1rem;font-size:.88rem}
+    .ms-kpi{background:white;border-radius:12px;padding:.9rem 1rem;text-align:center;
+        box-shadow:0 2px 8px rgba(0,0,0,.08);border-top:4px solid #2980B9;margin-bottom:.5rem}
+    .ms-kpi-val{font-size:1.7rem;font-weight:800;line-height:1.1}
+    .ms-kpi-lbl{font-size:.72rem;color:#7F8C8D;text-transform:uppercase;
+        letter-spacing:.6px;margin-top:.25rem}
+    .ms-kpi-sub{font-size:.75rem;color:#95A5A6;margin-top:.15rem}
+    .ms-placeholder{background:#F4F6F7;border:2px dashed #BDC3C7;border-radius:12px;
+        padding:2rem;text-align:center;color:#7F8C8D;font-size:.9rem;margin-top:1rem}
+    </style>""", unsafe_allow_html=True)
+
+    # HEADER
+    st.markdown("""
+    <div style="background:linear-gradient(135deg,#1B4F72,#154360);color:white;
+         padding:1.4rem 1.8rem;border-radius:14px;margin-bottom:1.5rem">
+      <div style="font-size:1.35rem;font-weight:800;letter-spacing:-.5px">
+        📦 Muestreo por Variables — Diseño de Planes para Procesos Continuos
+      </div>
+      <div style="font-size:.82rem;opacity:.8;margin-top:.35rem">
+        Distribución normal · Curva OC por variables · Diseño de n · Riesgos α / β
+      </div>
+    </div>""", unsafe_allow_html=True)
+
+    # ── SECCIÓN 1: Parámetros del proceso ─────────────────────────────────────
+    st.markdown('<div class="ms-section">⚙️ 1. Parámetros del Proceso</div>',
+                unsafe_allow_html=True)
+    st.markdown("""<div class="ms-info">
+    Valores autollenados desde Fase I del proyecto. Editables para análisis manual.<br>
+    El módulo trabaja con <b>variables continuas de peso (kg)</b>, no con clasificación
+    defectuoso/no defectuoso.</div>""", unsafe_allow_html=True)
+
+    s = st.session_state
+    _mu0_def  = float(s["xbar_bar"])  if s.get("xbar_bar", 0) != 0 else 40.3845
+    _sig_def  = float(s["sigma_st"])  if s.get("sigma_st", 0) != 0 else 0.5663
+    _lsl_def  = float(s.get("cap_lsl", 39.50))
+    _usl_def  = float(s.get("cap_usl", 40.50))
+    _nom_def  = float(s.get("cap_nominal", 40.00))
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        _mu0 = st.number_input("μ₀ — Media del proceso (kg)", value=_mu0_def,
+                               format="%.4f", help="Autollenado desde Fase I. Editable.")
+        _sig = st.number_input("σ — Desv. estándar proceso (kg)", min_value=0.0001,
+                               value=_sig_def, format="%.4f",
+                               help="σ̂ = R̄/d₂ de Fase I. Editable.")
+    with c2:
+        _LSL = st.number_input("LSL — Límite inf. especificación (kg)",
+                               value=_lsl_def, format="%.2f")
+        _USL = st.number_input("USL — Límite sup. especificación (kg)",
+                               value=_usl_def, format="%.2f")
+        _nom = st.number_input("Nominal (kg)", value=_nom_def, format="%.2f")
+    with c3:
+        _alpha = st.number_input("α — Riesgo productor", min_value=0.001,
+                                 max_value=0.30, value=0.05, format="%.3f",
+                                 help="P(rechazar lote bueno) — Error Tipo I")
+        _beta  = st.number_input("β — Riesgo consumidor", min_value=0.001,
+                                 max_value=0.30, value=0.10, format="%.3f",
+                                 help="P(aceptar lote malo) — Error Tipo II")
+        _delta_sigma = st.number_input("Δμ — Cambio detectable (en σ)", min_value=0.05,
+                                       max_value=5.0, value=0.5, format="%.2f",
+                                       help="Desplazamiento mínimo a detectar en unidades de σ")
+        _n_eval = st.number_input("n — Tamaño de muestra a evaluar", min_value=1,
+                                  value=5, step=1, format="%d")
+
+    _delta_kg = _delta_sigma * _sig   # desplazamiento real en kg
+    _mu1      = _mu0 + _delta_kg      # media alternativa
+
+    st.markdown(f"""<div class="ms-info">
+    <b>Proceso real:</b> μ₀ = {_mu0:.4f} kg · σ = {_sig:.4f} kg ·
+    Δμ = {_delta_sigma:.2f}σ = {_delta_kg:.4f} kg →
+    μ₁ = {_mu1:.4f} kg</div>""", unsafe_allow_html=True)
+    st.markdown("---")
+
+    # ── Cálculos base ─────────────────────────────────────────────────────────
+    Za2   = norm.ppf(1.0 - _alpha / 2.0)   # two-sided
+    Za1   = norm.ppf(1.0 - _alpha)          # one-sided
+    Zb    = norm.ppf(1.0 - _beta)
+    d     = _delta_sigma                    # d = Δμ/σ
+
+    # Potencia con n evaluado (two-sided)
+    _se   = _sig / math.sqrt(_n_eval)
+    _UCL  = _mu0 + Za2 * _se
+    _LCL  = _mu0 - Za2 * _se
+    # P(rechazar H0 | μ = μ1) — two-sided
+    pot_upper = 1.0 - norm.cdf((_UCL - _mu1) / _se)
+    pot_lower = norm.cdf((_LCL - _mu1) / _se)
+    _potencia = pot_upper + pot_lower
+    _beta_real = 1.0 - _potencia
+
+    # n diseñado (fórmula exacta two-sided)
+    _n_dis = math.ceil(((Za2 + Zb) / d) ** 2)
+    _n_dis = max(2, _n_dis)
+
+    # ── SECCIÓN 2: Potencia y evaluación del plan ──────────────────────────────
+    st.markdown('<div class="ms-section">📊 2. Potencia y Evaluación del Plan</div>',
+                unsafe_allow_html=True)
+
+    k1, k2, k3, k4 = st.columns(4)
+    for col, sym, val, color, lbl, sub in [
+        (k1, "d", f"{d:.3f}", CB, "Tamaño de efecto",
+         f"Δμ/σ = {_delta_kg:.4f}/{_sig:.4f}"),
+        (k2, f"{_potencia*100:.1f}%",
+         f"{_potencia*100:.1f}%", CG if _potencia >= 0.80 else CY if _potencia >= 0.60 else CR,
+         "Potencia (1−β)", f"n={_n_eval} · Obj ≥ {(1-_beta)*100:.0f}%%"),
+        (k3, f"{_beta_real:.4f}",
+         f"{_beta_real:.4f}", CG if _beta_real <= _beta else CR,
+         "β real", f"Obj ≤ {_beta:.3f}  {'✅' if _beta_real <= _beta else '❌'}"),
+        (k4, f"±{Za2*_se*1000:.1f} g",
+         f"±{Za2*_se*1000:.1f} g", CB, "Semiancho IC (n evaluado)",
+         f"x̄ ± Zα/2·σ/√{_n_eval}"),
+    ]:
+        with col:
+            st.markdown(f"""<div class="ms-kpi" style="border-top-color:{color}">
+              <div class="ms-kpi-val" style="color:{color}">{val}</div>
+              <div class="ms-kpi-lbl">{lbl}</div>
+              <div class="ms-kpi-sub">{sub}</div></div>""", unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    # Diagnóstico
+    if _potencia >= 1 - _beta:
+        bg, brd = "#D5F5E3", CG
+        msg = (f"✅ <b>n = {_n_eval} detecta el cambio Δμ = {_delta_sigma:.2f}σ con potencia "
+               f"{_potencia*100:.1f}%%</b> (objetivo ≥ {(1-_beta)*100:.0f}%%).")
+    elif _potencia >= 0.60:
+        bg, brd = "#FEF9E7", CY
+        msg = (f"⚠️ <b>Potencia moderada {_potencia*100:.1f}%%.</b> Para alcanzar "
+               f"{(1-_beta)*100:.0f}%% se requiere n ≥ {_n_dis}.")
+    else:
+        bg, brd = "#FADBD8", CR
+        msg = (f"❌ <b>Potencia insuficiente {_potencia*100:.1f}%%.</b> n = {_n_eval} es "
+               f"demasiado pequeño. Se recomienda n = {_n_dis}.")
+    st.markdown(f"""<div style="background:{bg};border-left:5px solid {brd};
+        padding:1rem 1.2rem;border-radius:8px;font-size:.9rem">{msg}</div>""",
+        unsafe_allow_html=True)
+    st.markdown("---")
+
+    # ── SECCIÓN 3: Diseño automático de n ────────────────────────────────────
+    st.markdown('<div class="ms-section">🔧 3. Diseño Automático del Tamaño de Muestra</div>',
+                unsafe_allow_html=True)
+    st.markdown(f"""<div class="ms-info">
+    <b>Fórmula:</b> n = ⌈((Zα/2 + Z₁₋β) / d)²⌉ &nbsp;·&nbsp;
+    Zα/2 = {Za2:.3f} · Z₁₋β = {Zb:.3f} · d = {d:.3f}<br>
+    n = ⌈(({Za2:.3f} + {Zb:.3f}) / {d:.3f})²⌉ =
+    ⌈{((Za2+Zb)/d)**2:.2f}⌉ = <b>{_n_dis}</b>
+    </div>""", unsafe_allow_html=True)
+
+    # Tabla potencia vs n
+    ns = list(range(2, max(_n_dis + 15, 20)))
+    rows = []
+    for ni in ns:
+        sei = _sig / math.sqrt(ni)
+        ucli = _mu0 + Za2 * sei
+        lcli = _mu0 - Za2 * sei
+        pi = (1 - norm.cdf((ucli - _mu1)/sei)) + norm.cdf((lcli - _mu1)/sei)
+        rows.append({"n": ni,
+                     "Potencia (1−β) %%": f"{pi*100:.2f}",
+                     "β": f"{(1-pi):.4f}",
+                     "Semiancho IC (g)": f"{Za2*sei*1000:.2f}",
+                     "Cumple potencia": "✅" if pi >= 1-_beta else "❌"})
+    df_n = pd.DataFrame(rows)
+    st.dataframe(df_n, use_container_width=True, hide_index=True, height=220)
+
+    kn1, kn2, kn3 = st.columns(3)
+    _pot_dis = 1 - norm.cdf((_mu0 + Za2*_sig/math.sqrt(_n_dis) - _mu1)/(_sig/math.sqrt(_n_dis))) +                norm.cdf((_mu0 - Za2*_sig/math.sqrt(_n_dis) - _mu1)/(_sig/math.sqrt(_n_dis)))
+    for col, sym, val, color, lbl, sub in [
+        (kn1, "n recomendado", str(_n_dis), CB, "n recomendado",
+         f"Para Δμ={_delta_sigma:.2f}σ · 1−β={1-_beta:.2f}"),
+        (kn2, f"{_pot_dis*100:.1f}%%", f"{_pot_dis*100:.1f}%%",
+         CG if _pot_dis >= 1-_beta else CY, "Potencia con n recomendado",
+         f"β = {1-_pot_dis:.4f}"),
+        (kn3, f"±{Za2*_sig/math.sqrt(_n_dis)*1000:.1f} g",
+         f"±{Za2*_sig/math.sqrt(_n_dis)*1000:.1f} g", CB,
+         "Precisión del IC", f"n={_n_dis}"),
+    ]:
+        with col:
+            st.markdown(f"""<div class="ms-kpi" style="border-top-color:{color}">
+              <div class="ms-kpi-val" style="color:{color}">{val}</div>
+              <div class="ms-kpi-lbl">{lbl}</div>
+              <div class="ms-kpi-sub">{sub}</div></div>""", unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown(f"""<div style="background:#EBF5FB;border-left:5px solid {CB};
+        padding:1rem 1.2rem;border-radius:8px;font-size:.9rem">
+      🎯 <b>Se requieren mínimo {_n_dis} muestras</b> para detectar un cambio de
+      {_delta_sigma:.2f}σ ({_delta_kg*1000:.1f} g) con potencia ≥ {(1-_beta)*100:.0f}%%.<br>
+      Con n = {_n_eval} evaluado se obtiene potencia = {_potencia*100:.1f}%%.
+    </div>""", unsafe_allow_html=True)
+    st.markdown("---")
+
+    # ── SECCIÓN 4: Curva OC por variables ────────────────────────────────────
+    st.markdown('<div class="ms-section">📈 4. Curva OC — Muestreo por Variables</div>',
+                unsafe_allow_html=True)
+    st.markdown("""<div class="ms-info">
+    <b>Pa(δ)</b> = probabilidad de aceptar H₀ cuando la media se desplaza δ·σ.<br>
+    Pa = Φ(Zα/2 − δ√n) − Φ(−Zα/2 − δ√n) &nbsp;·&nbsp; distribución normal estándar.
+    </div>""", unsafe_allow_html=True)
+
+    delta_vals = np.linspace(-3.5, 3.5, 400)  # desplazamiento en unidades de σ
+
+    def oc_curve(n_val):
+        pa = []
+        for dv in delta_vals:
+            pa.append(norm.cdf(Za2 - dv * math.sqrt(n_val)) -
+                      norm.cdf(-Za2 - dv * math.sqrt(n_val)))
+        return pa
+
+    Pa_eval = oc_curve(_n_eval)
+    Pa_rec  = oc_curve(_n_dis)
+
+    fig_oc = go.Figure()
+    fig_oc.add_trace(go.Scatter(x=delta_vals, y=Pa_eval, mode="lines",
+        name=f"n = {_n_eval} (evaluado)", line=dict(color=CB, width=2.5),
+        hovertemplate="δ=%{x:.3f}σ<br>Pa=%{y:.4f}<extra></extra>"))
+    fig_oc.add_trace(go.Scatter(x=delta_vals, y=Pa_rec, mode="lines",
+        name=f"n = {_n_dis} (recomendado)", line=dict(color=CG, width=2.5, dash="dash"),
+        hovertemplate="δ=%{x:.3f}σ<br>Pa=%{y:.4f}<extra></extra>"))
+
+    # Líneas horizontales
+    fig_oc.add_hline(y=1-_alpha, line_width=1.5, line_dash="dot", line_color=CG,
+                     annotation_text=f"1−α = {1-_alpha:.2f}", annotation_position="right",
+                     annotation_font_size=11)
+    fig_oc.add_hline(y=_beta, line_width=1.5, line_dash="dot", line_color=CY,
+                     annotation_text=f"β = {_beta:.2f}", annotation_position="right",
+                     annotation_font_size=11)
+    # Línea δ = 0
+    fig_oc.add_vline(x=0, line_width=1.2, line_dash="dot", line_color="#BDC3C7",
+                     annotation_text="H₀: δ=0", annotation_position="top",
+                     annotation_font_size=10)
+    # Línea desplazamiento objetivo
+    fig_oc.add_vline(x=_delta_sigma, line_width=1.5, line_dash="dot", line_color=CR,
+                     annotation_text=f"Δ={_delta_sigma:.2f}σ", annotation_position="top right",
+                     annotation_font_size=11)
+
+    fig_oc.add_vrect(x0=-0.5, x1=0.5, fillcolor="rgba(39,174,96,0.06)", line_width=0,
+                     annotation_text="Zona aceptable", annotation_position="top left",
+                     annotation_font_size=10)
+    fig_oc.add_vrect(x0=_delta_sigma, x1=3.5, fillcolor="rgba(231,76,60,0.06)", line_width=0,
+                     annotation_text="Zona rechazo", annotation_position="top right",
+                     annotation_font_size=10)
+
+    fig_oc.update_layout(
+        height=420,
+        xaxis=dict(title="δ — Desplazamiento de la media (unidades de σ)",
+                   tickformat=".2f", showgrid=True, gridcolor="#F0F3F4"),
+        yaxis=dict(title="Pa — Probabilidad de aceptación H₀",
+                   tickformat=".2f", range=[0, 1.05], showgrid=True, gridcolor="#F0F3F4"),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        plot_bgcolor="white", paper_bgcolor="white",
+        margin=dict(l=52, r=110, t=60, b=48),
+        title=dict(text="Curva OC — Plan de Muestreo por Variables (distribución normal)",
+                   font_size=13, x=0.01),
+        hovermode="x unified"
+    )
+    st.plotly_chart(fig_oc, use_container_width=True)
+
+    # Tabla puntos clave
+    deltas_tabla = [0.0, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 2.5, 3.0]
+    st.dataframe(pd.DataFrame({
+        "δ (σ)": [f"{d:.2f}" for d in deltas_tabla],
+        f"Pa n={_n_eval}":  [f"{norm.cdf(Za2 - d*math.sqrt(_n_eval)) - norm.cdf(-Za2 - d*math.sqrt(_n_eval)):.4f}"
+                              for d in deltas_tabla],
+        f"Pa n={_n_dis}":   [f"{norm.cdf(Za2 - d*math.sqrt(_n_dis))  - norm.cdf(-Za2 - d*math.sqrt(_n_dis)):.4f}"
+                              for d in deltas_tabla],
+    }), use_container_width=True, hide_index=True)
+    st.markdown("---")
+
+    # ── SECCIÓN 5: Interpretación ─────────────────────────────────────────────
+    st.markdown('<div class="ms-section">🎓 5. Interpretación del Plan</div>',
+                unsafe_allow_html=True)
+
+    interp = []
+    if _potencia >= 0.90:
+        interp.append((CG, "✅ Alta potencia",
+            f"El plan detecta cambios de {_delta_sigma:.2f}σ con potencia {_potencia*100:.1f}%%. "
+            "Sensibilidad excelente para el proceso."))
+    elif _potencia >= 0.70:
+        interp.append((CY, "⚠ Potencia moderada",
+            f"Potencia {_potencia*100:.1f}%%. Aumentar n mejora la detección. "
+            f"Se recomienda n = {_n_dis}."))
+    else:
+        interp.append((CR, "❌ Potencia baja",
+            f"n = {_n_eval} es insuficiente para detectar Δμ = {_delta_sigma:.2f}σ. "
+            f"Use n = {_n_dis}."))
+
+    slope_oc = abs(norm.cdf(Za2 - 1.0*math.sqrt(_n_eval)) -
+                   norm.cdf(Za2 - 0.0*math.sqrt(_n_eval)))
+    if slope_oc > 0.5:
+        interp.append((CG, "✅ Curva OC muy inclinada",
+            f"El plan discrimina bien entre μ = μ₀ y μ = μ₀ + σ. Alta sensibilidad."))
+    else:
+        interp.append((CY, "⚠ Curva OC poco inclinada",
+            "El plan tiene dificultad para separar lotes marginales de buenos."))
+
+    if _delta_sigma <= 0.5:
+        interp.append((CY, "🔍 Cambio pequeño a detectar",
+            f"Δμ = {_delta_sigma:.2f}σ = {_delta_kg*1000:.1f} g requiere muestras grandes. "
+            f"n recomendado = {_n_dis}."))
+    elif _delta_sigma <= 1.0:
+        interp.append((CB, "⚖ Cambio moderado",
+            f"Δμ = {_delta_sigma:.2f}σ = {_delta_kg*1000:.1f} g. Plan balanceado."))
+    else:
+        interp.append((CG, "📏 Cambio grande a detectar",
+            f"Δμ = {_delta_sigma:.2f}σ = {_delta_kg*1000:.1f} g. "
+            "El plan necesita pocas muestras para detectarlo."))
+
+    if _n_eval >= _n_dis:
+        interp.append((CG, "✅ Tamaño de muestra adecuado",
+            f"n = {_n_eval} ≥ n recomendado = {_n_dis}. Todos los objetivos cubiertos."))
+    else:
+        interp.append((CR, "❌ Muestra insuficiente",
+            f"n = {_n_eval} < n recomendado = {_n_dis}. "
+            "Aumentar la muestra para cumplir los riesgos especificados."))
+
+    for color, title, body in interp:
+        st.markdown(f"""<div style="background:white;border-left:5px solid {color};
+            padding:.9rem 1.1rem;border-radius:8px;margin-bottom:.7rem;
+            box-shadow:0 1px 4px rgba(0,0,0,.06)">
+          <b style="color:{color}">{title}</b><br>
+          <span style="font-size:.87rem;color:#566573">{body}</span>
+        </div>""", unsafe_allow_html=True)
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown(f"""
+    <div style="background:#EBF5FB;border-left:5px solid {CB};
+        padding:1rem 1.2rem;border-radius:8px;font-size:.9rem">
+      📌 <b>Resumen del plan para el proceso de mogolla:</b><br>
+      μ₀ = {_mu0:.4f} kg · σ = {_sig:.4f} kg · LSL = {_LSL:.2f} · USL = {_USL:.2f}<br>
+      Para detectar un cambio de <b>{_delta_sigma:.2f}σ ({_delta_kg*1000:.1f} g)</b>
+      con potencia ≥ {(1-_beta)*100:.0f}%% se requieren <b>n = {_n_dis} muestras por subgrupo</b>.<br>
+      Plan evaluado con n = {_n_eval}: potencia = {_potencia*100:.1f}%% ·
+      β real = {_beta_real:.4f}
+    </div>""", unsafe_allow_html=True)
+
+
+
 if pagina_activa == "capacidad":
     page_capacidad()
 
@@ -3015,6 +3373,9 @@ elif pagina_activa == "potencia":
 
 elif pagina_activa == "monitoreo":
     page_monitoreo()
+
+elif pagina_activa == "muestreo":
+    page_muestreo()
 
 elif pagina_activa == "eco_analisis":
     page_eco_analisis()
