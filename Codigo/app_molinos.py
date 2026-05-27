@@ -255,6 +255,17 @@ if st.session_state["modo_carga"] == "excel":
 
     if _pagina_ahora == "capacidad":
         sample_bytes = generate_sample_excel()
+
+        if "df_excel_raw" not in st.session_state:
+            st.markdown(render_alarm("info", (
+                "<strong>📋 Instrucciones de uso</strong><br><br>"
+                "1. Descarga la <strong>plantilla de ejemplo</strong> con el botón de abajo<br>"
+                "2. Completa con los datos de pesaje de tu línea (columnas X1…Xn)<br>"
+                "3. Carga el archivo Excel con el botón de abajo<br>"
+                "4. El sistema calculará automáticamente CEP, capacidad, potencia y economía<br><br>"
+                "<strong>Límites activos:</strong> LIE = 39.5 kg · LSE = 40.5 kg · Nominal = 40.0 kg"
+            )), unsafe_allow_html=True)
+
         upc, dlc = st.columns([4, 1])
         with upc:
             uploaded = st.file_uploader(
@@ -272,14 +283,6 @@ if st.session_state["modo_carga"] == "excel":
             )
 
         if uploaded is None and "df_excel_raw" not in st.session_state:
-            st.markdown(render_alarm("info", (
-                "<strong>📋 Instrucciones de uso</strong><br><br>"
-                "1. Descarga la <strong>plantilla de ejemplo</strong> con el botón de arriba<br>"
-            "2. Completa con los datos de pesaje de tu línea (columnas X1\u2026Xn)<br>"
-            "3. Carga el archivo Excel con el botón de arriba<br>"
-            "4. El sistema calculará automáticamente CEP, capacidad, potencia y economía<br><br>"
-            "<strong>Límites activos:</strong> LIE = 39.5 kg · LSE = 40.5 kg · Nominal = 40.0 kg"
-        )), unsafe_allow_html=True)
             st.stop()
 
     _proc_ok = False
@@ -352,6 +355,15 @@ else:
         unsafe_allow_html=True,
     )
 
+    if not st.session_state["df_manual_ok"]:
+        st.markdown(render_alarm("info", (
+            "<strong>📋 Instrucciones</strong><br><br>"
+            "1. Configura el número de subgrupos y el tamaño de muestra <strong>n</strong><br>"
+            "2. Completa todos los valores de peso en la tabla (kg)<br>"
+            "3. Pulsa <strong>💾 Guardar datos iniciales</strong> para activar el análisis<br><br>"
+            "<strong>Límites activos:</strong> LIE = 39.5 kg · LSE = 40.5 kg · Nominal = 40.0 kg"
+        )), unsafe_allow_html=True)
+
     # ── Controles de estructura ───────────────────────────────────────────────
     _mc_a, _mc_b = st.columns([1, 1])
     with _mc_a:
@@ -407,14 +419,6 @@ else:
             st.session_state["df_manual_raw"] = _df_save
             st.session_state["df_manual_ok"]  = True
 
-    if not st.session_state["df_manual_ok"]:
-        st.markdown(render_alarm("info", (
-            "<strong>📋 Instrucciones</strong><br><br>"
-            "1. Configura el número de subgrupos y el tamaño de muestra <strong>n</strong><br>"
-            "2. Completa todos los valores de peso en la tabla (kg)<br>"
-            "3. Pulsa <strong>💾 Guardar datos iniciales</strong> para activar el análisis<br><br>"
-            "<strong>Límites activos:</strong> LIE = 39.5 kg · LSE = 40.5 kg · Nominal = 40.0 kg"
-        )), unsafe_allow_html=True)
         st.stop()
 
     # Datos confirmados → construir df_raw / n / x_cols / s idénticos al flujo Excel
@@ -619,9 +623,9 @@ def page_capacidad():
     st.markdown(render_section_title("📐 Estadísticos del Proceso"), unsafe_allow_html=True)
     sc1, sc2, sc3, sc4, sc5, sc6 = st.columns(6)
     for col, lbl, val in [
-        (sc1, "x̄ global",    f"{s_cap['xbar_bar']:.4f} kg"),
-        (sc2, "σ̂ (R̄/d₂)",   f"{s_cap['sigma_st']:.4f} kg"),
-        (sc3, "R̄",           f"{s_cap['R_bar']:.4f} kg"),
+        (sc1, "x̄  (Media del proceso)",    f"{s_cap['xbar_bar']:.4f} kg"),
+        (sc2, "σ proceso  (R̄/d₂)",   f"{s_cap['sigma_st']:.4f} kg"),
+        (sc3, "R promedio",          f"{s_cap['R_bar']:.4f} kg"),
         (sc4, "n",            str(s_cap["n"])),
         (sc5, "Subgrupos",    str(len(s_cap["df"]))),
         (sc6, "PNC total",    f"{_pnc_tot*100:.3f}%"),
@@ -849,7 +853,7 @@ def page_capacidad():
         st.markdown(f"""<div class="kpi-card {'yellow' if _kpi_over_g_cap > 0 else 'green'}">
         <div class="kpi-value" style="color:{CY if _kpi_over_g_cap > 0 else CG}">{_kpi_over_g_cap:+.1f} g</div>
         <div class="kpi-label">Sobrellenado promedio</div>
-        <div class="kpi-sub">x̄ = {s_cap['xbar_bar']:.4f} kg &nbsp;·&nbsp; Ver costos en 💰 Análisis Económico</div></div>""",
+        <div class="kpi-sub">Media = {s_cap['xbar_bar']:.4f} kg &nbsp;·&nbsp; Ver costos en 💰 Análisis Económico</div></div>""",
         unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
@@ -889,8 +893,8 @@ def page_cartas_cep():
         |d₂|**{co['d2']}**| |LC X̄|**{s['xbar_bar']:.4f} kg**|
         |A₂|**{co['A2']}**| |LCI X̄|**{s['LCL_x']:.4f} kg**|
         |D₃|**{co['D3']}**| |LCS R|**{s['UCL_r']:.4f} kg**|
-        |D₄|**{co['D4']}**| |R̄|**{s['R_bar']:.4f} kg**|
-        |σ̂|**{s['sigma_st']:.4f} kg**| |LCI R|**{s['LCL_r']:.4f} kg**|
+        |D₄|**{co['D4']}**| |R promedio|**{s['R_bar']:.4f} kg**|
+        |σ proceso|**{s['sigma_st']:.4f} kg**| |LCI R|**{s['LCL_r']:.4f} kg**|
         """)
 
 
@@ -967,17 +971,22 @@ def page_potencia():
     with pot_col1:
         pa1, pa2 = st.columns(2)
         with pa1:
-            _mu0 = st.number_input("Media actual (μ₀)", value=float(f"{_mu0:.4f}"),
-                            format="%.4f", step=0.0001, key="pot_mu0")
-            _UCL = st.number_input("LCS", value=float(f"{_UCL:.4f}"),
-                            format="%.4f", step=0.0001, key="pot_UCL")
+            _mu0_txt = st.text_input("Media actual (μ₀)", value=f"{_mu0:.4f}", key="pot_mu0")
+            try: _mu0 = float(_mu0_txt.replace(",", "."))
+            except: pass
+            _UCL_txt = st.text_input("LCS", value=f"{_UCL:.4f}", key="pot_UCL")
+            try: _UCL = float(_UCL_txt.replace(",", "."))
+            except: pass
         with pa2:
-            _sig = st.number_input("Sigma (σ)", value=float(f"{_sig:.6f}"),
-                            format="%.6f", step=0.000001, key="pot_sig")
-            _LCL = st.number_input("LCI", value=float(f"{_LCL:.4f}"),
-                            format="%.4f", step=0.0001, key="pot_LCL")
-        _n = st.number_input("Tamaño de muestra (n)", value=int(_n),
-                             min_value=2, max_value=1000, step=1, key="pot_n")
+            _sig_txt = st.text_input("Sigma (σ)", value=f"{_sig:.6f}", key="pot_sig")
+            try: _sig = float(_sig_txt.replace(",", "."))
+            except: pass
+            _LCL_txt = st.text_input("LCI", value=f"{_LCL:.4f}", key="pot_LCL")
+            try: _LCL = float(_LCL_txt.replace(",", "."))
+            except: pass
+        _n_txt = st.text_input("Tamaño de muestra (n)", value=str(int(_n)), key="pot_n")
+        try: _n = max(2, min(1000, int(_n_txt)))
+        except: pass
 
     with pot_col2:
         st.markdown(render_section_title("✏️ Parámetro manual"), unsafe_allow_html=True)
@@ -1038,7 +1047,7 @@ def page_potencia():
                 st.markdown(f"""<div class="kpi-card">
                 <div class="kpi-value" style="color:{CP}">{ARL0_p:.0f}</div>
                 <div class="kpi-label">ARL₀</div>
-                <div class="kpi-sub">Muestras entre falsas alarmas</div></div>""",
+                <div class="kpi-sub">1/α &nbsp;·&nbsp; α≈0.0027 (3σ)</div></div>""",
                 unsafe_allow_html=True)
 
             with kp4:
@@ -1095,8 +1104,9 @@ def page_potencia():
     arl_col1, arl_col2 = st.columns([1, 1])
 
     with arl_col1:
-        arl_n    = st.number_input("Tamaño de muestra (n)", min_value=2, max_value=1000,
-                                   value=int(_n), key="arl_n")
+        _arl_n_txt = st.text_input("Tamaño de muestra (n)", value=str(int(_n)), key="arl_n")
+        try: arl_n = max(2, min(1000, int(_arl_n_txt)))
+        except: arl_n = int(_n)
         _arl_mu1_txt = st.text_input(
             "Media con cambio (μ₁) en kg",
             value=st.session_state["arl_mu1_val"],
@@ -1106,15 +1116,17 @@ def page_potencia():
         )
         st.session_state["arl_mu1_val"] = _arl_mu1_txt
 
-        arl_alfa = st.number_input("Nivel de significancia (α)", value=0.0027,
-                                   format="%.4f", min_value=0.0001, max_value=0.10,
-                                   key="arl_alfa",
-                                   help="0.0027 corresponde a límites 3-sigma")
+        _arl_alfa_txt = st.text_input("Nivel de significancia (α)", value="0.0027",
+                                      key="arl_alfa",
+                                      help="0.0027 corresponde a límites 3-sigma")
+        try: arl_alfa = max(0.0001, min(0.10, float(_arl_alfa_txt.replace(",", "."))))
+        except: arl_alfa = 0.0027
 
     with arl_col2:
-        arl_h    = st.number_input("Tiempo entre muestras",
-                                   value=float(freq_min), min_value=0.1,
-                                   format="%.1f", key="arl_h")
+        _arl_h_txt = st.text_input("Tiempo entre muestras",
+                                   value=f"{float(freq_min):.1f}", key="arl_h")
+        try: arl_h = max(0.1, float(_arl_h_txt.replace(",", ".")))
+        except: arl_h = float(freq_min)
         arl_unit = st.selectbox("Unidad de tiempo", ["Minutos", "Horas"],
                                 key="arl_unit")
         st.markdown("<br>", unsafe_allow_html=True)
@@ -1196,7 +1208,7 @@ def page_potencia():
                 st.markdown(f"""<div class="kpi-card">
                 <div class="kpi-value" style="color:{CP}">{ARL0_arl:.0f}</div>
                 <div class="kpi-label">ARL₀ (muestras)</div>
-                <div class="kpi-sub">α = {arl_alfa:.4f}</div></div>""",
+                <div class="kpi-sub">1/α = 1/{arl_alfa:.4f}</div></div>""",
                 unsafe_allow_html=True)
 
             c_arl1 = CG if ARL1_arl <= 5 else CY if ARL1_arl <= 20 else CR
@@ -1205,7 +1217,7 @@ def page_potencia():
                 st.markdown(f"""<div class="kpi-card {b_arl1}">
                 <div class="kpi-value" style="color:{c_arl1}">{ARL1_arl:.1f}</div>
                 <div class="kpi-label">ARL₁ (muestras)</div>
-                <div class="kpi-sub">1 / (1−β)</div></div>""",
+                <div class="kpi-sub">1/(1−β) = 1/potencia</div></div>""",
                 unsafe_allow_html=True)
 
             with kc:
@@ -1233,6 +1245,83 @@ def page_potencia():
                 f"El proceso en control genera una falsa alarma cada "
                 f"<strong>{ATS0_arl:.0f} {unidad_lbl}</strong>."
             ), unsafe_allow_html=True)
+
+            st.markdown("---")
+            # ── Decisiones de Muestreo y Carga Muestral ────────────────
+            st.markdown("""
+            <div style="background:linear-gradient(135deg,#0B3D0B,#1A6B1A);color:white;
+                 padding:1.1rem 1.5rem;border-radius:10px;margin-bottom:.8rem;">
+            <h3 style="margin:0 0 .25rem;font-size:1.15rem;">📋 Decisiones de Muestreo y Carga Muestral</h3>
+            <p style="margin:0;opacity:.85;font-size:.82rem;">
+            Interpretación automática basada en ARL₁, ATS₁ y carga muestral (CM = n / h).</p>
+            </div>
+            """, unsafe_allow_html=True)
+
+            # ─ Cálculo CM ─────────────────────────────────────────────────
+            _cm = arl_n / max(arl_h, 1e-9)  # unidades/tiempo
+
+            # ─ Interpretación ATS/ARL ──────────────────────────────────────────
+            _ats_threshold_alto     = arl_h * 20   # ATS alto: tarda más de 20 muestras
+            _ats_threshold_moderado = arl_h * 5    # ATS moderado: entre 5 y 20 muestras
+
+            if ATS1_arl > _ats_threshold_alto or ARL1_arl > 20:
+                _sens_tipo  = "critical"
+                _sens_icono = "⚠️"
+                _sens_txt   = ("<strong>Baja sensibilidad para detectar cambios.</strong> "
+                               f"ARL₁ = {ARL1_arl:.1f} muestras — "
+                               "considera aumentar <em>n</em> o reducir el intervalo <em>h</em>.")
+            elif ATS1_arl <= _ats_threshold_moderado and ARL1_arl <= 5:
+                _sens_tipo  = "ok"
+                _sens_icono = "✅"
+                _sens_txt   = ("<strong>Detección rápida de desviaciones.</strong> "
+                               f"ARL₁ = {ARL1_arl:.1f} muestras — "
+                               "el plan de muestreo es muy sensible al corrimiento evaluado.")
+            else:
+                _sens_tipo  = "warn"
+                _sens_icono = "🟡"
+                _sens_txt   = ("<strong>Velocidad de detección aceptable.</strong> "
+                               f"ARL₁ = {ARL1_arl:.1f} muestras — "
+                               "el plan es funcional; puede optimizarse según el costo.")
+
+            # ─ Interpretación CM ──────────────────────────────────────────────────
+            if _cm > 2.0:
+                _cm_tipo = "warn"
+                _cm_txt  = (f"<strong>Carga muestral elevada</strong> (CM = {_cm:.2f} unidades/{unidad_lbl}). "
+                             "Esto implica mayor costo operativo de inspección.")
+            elif _cm >= 0.5:
+                _cm_tipo = "ok"
+                _cm_txt  = (f"<strong>Carga muestral balanceada</strong> (CM = {_cm:.2f} unidades/{unidad_lbl}). "
+                             "Buena relación entre sensibilidad y costo de muestreo.")
+            else:
+                _cm_tipo = "info"
+                _cm_txt  = (f"<strong>Carga muestral baja</strong> (CM = {_cm:.2f} unidades/{unidad_lbl}). "
+                             "Posible menor sensibilidad ante corrimientos pequeños.")
+
+            # ─ Layout KPIs + alarmas ─────────────────────────────────────────────
+            _dm_c1, _dm_c2 = st.columns(2)
+            with _dm_c1:
+                st.markdown(render_section_title("🎯 Sensibilidad del Plan"), unsafe_allow_html=True)
+                st.markdown(render_alarm(_sens_tipo, f"{_sens_icono} {_sens_txt}"), unsafe_allow_html=True)
+            with _dm_c2:
+                st.markdown(render_section_title("🔢 Carga Muestral (CM = n / h)"), unsafe_allow_html=True)
+                st.markdown(render_alarm(_cm_tipo, _cm_txt), unsafe_allow_html=True)
+
+            # ─ Tabla resumen ──────────────────────────────────────────────────────
+            st.markdown(render_section_title("📊 Resumen de Decisiones"), unsafe_allow_html=True)
+            _dm_df = pd.DataFrame({
+                "Parámetro":   ["n (muestra)", "h (intervalo)", "CM = n/h",
+                               "ARL₀ (control)", "ARL₁ (cambio)",
+                               "ATS₀", "ATS₁"],
+                "Fórmula":    ["configurado", "configurado", "n / h",
+                               "1 / α", "1 / (1 − β)",
+                               "ARL₀ × h", "ARL₁ × h"],
+                "Valor":       [str(int(arl_n)), f"{arl_h:.1f} {unidad_lbl}",
+                               f"{_cm:.3f} u/{unidad_lbl}",
+                               f"{ARL0_arl:.0f} muestras", f"{ARL1_arl:.1f} muestras",
+                               f"{ATS0_arl:.1f} {unidad_lbl}", f"{ATS1_arl:.1f} {unidad_lbl}"],
+            })
+            st.dataframe(_dm_df, use_container_width=True, hide_index=True,
+                         key="df_decisiones_muestreo")
 
         except ValueError:
             st.warning("⚠ Valor de μ₁ inválido.")
@@ -2579,21 +2668,31 @@ def page_eco_analisis():
     _e_hours = st.session_state["eco_hours_day"]
     _e_days  = st.session_state["eco_days_month"]
 
-    # Parámetros Fase I (solo lectura)
-    _xb  = s["xbar_bar"]
-    _sig = s["sigma_st"]
+    # Parámetros Fase I — autollenados, editables manualmente
+    st.session_state.setdefault("eco_xb_edit",  float(s["xbar_bar"]))
+    st.session_state.setdefault("eco_sig_edit", float(s["sigma_st"]))
+    st.session_state.setdefault("eco_lsl_edit", float(_LSL))
+    st.session_state.setdefault("eco_usl_edit", float(_USL))
 
-    # Referencia automática desde Fase I
     ep5, ep6, ep7, ep8 = st.columns(4)
-    _des_g_nominal = round((_xb - _NOMINAL) * 1000, 1)
     with ep5:
-        st.metric("μ (Fase I)", f"{_xb:.4f} kg",
-                  delta=_des_g_nominal,
-                  delta_color="inverse" if _des_g_nominal > 0 else "normal",
-                  help=f"Desviación sobre nominal: {_des_g_nominal:+.1f} g/saco")
-    with ep6: st.metric("σ̂ (Fase I)", f"{_sig:.4f} kg",  help="Desviación estándar estimada R̄/d₂")
-    with ep7: st.metric("LSL",         f"{_LSL:.2f} kg")
-    with ep8: st.metric("USL",         f"{_USL:.2f} kg")
+        _xb = st.number_input("μ proceso (kg)", value=float(s["xbar_bar"]),
+                              format="%.4f", key="eco_xb_edit",
+                              help="Autollenado desde Fase I (x̄). Editable para análisis manual.")
+    with ep6:
+        _sig = st.number_input("σ proceso (kg)", min_value=0.0001,
+                               value=float(s["sigma_st"]),
+                               format="%.4f", key="eco_sig_edit",
+                               help="R̄/d₂ de Fase I. Editable para análisis manual.")
+    with ep7:
+        _LSL = st.number_input("LSL (kg)", value=float(st.session_state["cap_lsl"]),
+                               format="%.2f", key="eco_lsl_edit",
+                               help="Límite de especificación inferior.")
+    with ep8:
+        _USL = st.number_input("USL (kg)", value=float(st.session_state["cap_usl"]),
+                               format="%.2f", key="eco_usl_edit",
+                               help="Límite de especificación superior.")
+    _des_g_nominal = round((_xb - _NOMINAL) * 1000, 1)
 
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -2644,34 +2743,47 @@ def page_eco_analisis():
 
     st.markdown("<br>", unsafe_allow_html=True)
 
+    # Banner: pregunta central
+    st.markdown("""
+    <div style="background:linear-gradient(135deg,#154360,#1B4F72);color:white;
+         padding:1rem 1.5rem;border-radius:10px;margin:.2rem 0 1rem;
+         border-left:5px solid #F1C40F;font-size:.88rem;line-height:1.55">
+    <strong style="font-size:.95rem">¿Cuál es la menor media que evita el rechazo del lote?</strong><br><br>
+    La empresa sobrellenar por seguridad estadística. Sin embargo, existe una media mínima μ*
+    tal que la probabilidad de que el promedio del lote caiga bajo el LSL sea prácticamente nula.
+    Operar en μ* reduce las pérdidas sin comprometer la conformidad del producto.
+    </div>
+    """, unsafe_allow_html=True)
+
     # ══════════════════════════════════════════════════════════════════════════
     # SECCIÓN 3 — SIMULACIÓN: probabilidad de rechazo de lote
     # ══════════════════════════════════════════════════════════════════════════
     st.markdown(render_section_title("🎯 Simulación — Media Óptima por Probabilidad de Rechazo"),
                 unsafe_allow_html=True)
     st.markdown(render_alarm("info",
-        "Ajusta el <strong>tamaño del lote</strong> y la <strong>probabilidad máxima de rechazo</strong> "
-        "aceptable. El sistema calculará la media óptima μ* que minimiza el sobrellenado "
-        "sin superar ese riesgo usando <code>μ* = LSL + z(1−p) · σ/√n_lote</code>."
+        "<strong>Ingresa los parámetros de simulación:</strong> tamaño del lote y probabilidad máxima de rechazo "
+        "tolerable. El sistema calculará la media mínima μ* que mantiene ese riesgo usando "
+        "<code>μ* = LSL + z(1−p) · σ/√n_lote</code>. "
+        "Con valores pequeños de p (ej. 0.100%) se garantiza un margen estadístico robusto."
     ), unsafe_allow_html=True)
 
     sim1, sim2 = st.columns(2)
     with sim1:
-        st.session_state["eco_lote"] = st.slider(
-            "Tamaño del lote del cliente (sacos)",
-            min_value=10, max_value=2000,
+        st.session_state["eco_lote"] = st.number_input(
+            "Tamaño del lote (sacos)",
+            min_value=1, max_value=100000,
             value=int(st.session_state["eco_lote"]),
-            step=10, key="eco_slider_lote",
+            step=1, key="eco_input_lote",
             help="Número de sacos por lote de despacho al cliente"
         )
     with sim2:
-        st.session_state["eco_p_rechazo"] = st.slider(
-            "Probabilidad máxima de rechazo del lote (%)",
-            min_value=0.01, max_value=5.0,
+        st.session_state["eco_p_rechazo"] = st.number_input(
+            "Probabilidad máxima de rechazo (%)",
+            min_value=0.001, max_value=10.0,
             value=float(st.session_state["eco_p_rechazo"]),
-            step=0.01, format="%.2f",
-            key="eco_slider_p",
-            help="P(x̄_lote < LSL) que el cliente está dispuesto a tolerar"
+            step=0.001, format="%.3f",
+            key="eco_input_p",
+            help="P(x̄_lote < LSL) tolerable. Ejemplo: 0.100 = 0.1 %"
         )
 
     _lote     = int(st.session_state["eco_lote"])
@@ -2680,8 +2792,8 @@ def page_eco_analisis():
     _z_opt    = stats.norm.ppf(1.0 - _p_rec)                 # z tal que P(Z>z) = p_rechazo
     _mu_opt   = _LSL + _z_opt * _se_lote                      # media óptima
 
-    # Clamp: no puede superar USL − 3σ ni bajar de nominal
-    _mu_opt = float(np.clip(_mu_opt, _NOMINAL, _USL - 3*_sig))
+    # μ* ∈ [LSL, x̄] — no menor al límite técnico, no mayor a la media actual
+    _mu_opt = float(np.clip(_mu_opt, _LSL, max(_xb, _LSL + 1e-6)))
 
     # Capacidad con media óptima
     _Cpk_opt = min((_USL - _mu_opt) / (3*_sig), (_mu_opt - _LSL) / (3*_sig))
@@ -2857,17 +2969,19 @@ def page_eco_analisis():
     # Alerta resumen
     if _ahorro_anio > 0:
         st.markdown(render_alarm("ok",
-            f"<strong>📌 Recomendación:</strong> Ajustando la media de dosificación a "
-            f"<strong>{_mu_opt:.4f} kg</strong> ({_des_opt:+.1f} g sobre nominal), "
-            f"la probabilidad de rechazo del lote de <strong>{_lote} sacos</strong> "
-            f"permanece ≤ <strong>{st.session_state['eco_p_rechazo']:.2f}%</strong>. "
-            f"Esto representa un ahorro de <strong>${_ahorro_anio:,.0f} COP/año</strong> "
-            f"equivalente a <strong>{_ahorro_sacos:.0f} sacos/año</strong> de producto recuperado."
+            f"<strong>📌 Conclusión estadística:</strong> La empresa está sobrellenando por seguridad. "
+            f"Estadísticamente, es posible operar con una media de <strong>{_mu_opt:.4f} kg</strong> "
+            f"({_des_opt:+.1f} g sobre nominal) manteniendo la probabilidad de rechazo del lote "
+            f"de <strong>{_lote} sacos</strong> en "
+            f"≤ <strong>{st.session_state['eco_p_rechazo']:.3f}%</strong> — prácticamente nula. "
+            f"Esto representa un ahorro de <strong>${_ahorro_anio:,.0f} COP/año</strong>, "
+            f"equivalente a recuperar <strong>{_ahorro_sacos:.0f} sacos/año</strong> de producto."
         ), unsafe_allow_html=True)
     else:
         st.markdown(render_alarm("info",
-            "ℹ️ La media actual ya está en o por debajo del óptimo para la probabilidad de rechazo configurada. "
-            "Considera reducir la probabilidad de rechazo aceptable para encontrar margen de mejora."
+            "ℹ️ Con los parámetros actuales, la media de Fase I ya está en o por debajo de μ*. "
+            "Reduce la probabilidad de rechazo aceptable (p_max) o aumenta el tamaño del lote "
+            "para encontrar margen de optimización."
         ), unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
