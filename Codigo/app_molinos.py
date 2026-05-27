@@ -298,8 +298,18 @@ if st.session_state["modo_carga"] == "excel":
                 st.error("❌ No se encontraron columnas X1, X2,... en el archivo.")
                 st.stop()
             df_raw[_xcand] = df_raw[_xcand].apply(pd.to_numeric, errors="coerce")
+            _invalid_mask  = df_raw[_xcand].isnull().any(axis=1)
+            _filas_xl      = (df_raw.index[_invalid_mask] + 2).tolist()  # +2: 1-index + encabezado
             df_raw = df_raw.dropna(subset=_xcand, how="all").reset_index(drop=True)
             df_raw = df_raw.dropna(subset=_xcand, how="any").reset_index(drop=True)
+            if _filas_xl:
+                _f_str = ", ".join(str(f) for f in _filas_xl[:8])
+                _extra = f" (y {len(_filas_xl)-8} más)" if len(_filas_xl) > 8 else ""
+                st.warning(
+                    f"⚠ Se eliminaron {len(_filas_xl)} fila(s) por datos no numéricos — "
+                    f"fila(s) Excel: {_f_str}{_extra}. "
+                    "Verifica que todas las celdas X1…Xn contengan números válidos."
+                )
             _keep  = [c for c in df_raw.columns
                       if (str(c).strip().upper().startswith("X") and str(c).strip()[1:].isdigit())
                       or str(c).lower() in ("subgrupo", "hora", "fecha", "turno", "operario")]
@@ -350,76 +360,84 @@ if st.session_state["modo_carga"] == "excel":
             st.warning(f"⚠ {iss}")
 # =============================================================================
 else:
-    st.markdown(
-        render_section_title("✍️ Ingreso Manual de Datos Históricos (Fase I)"),
-        unsafe_allow_html=True,
-    )
+    # Bloque de ingreso VISIBLE solo en Capacidad; el resto de páginas solo reconstruye s
+    if _pagina_ahora == "capacidad":
+        st.markdown(
+            render_section_title("✍️ Ingreso Manual de Datos Históricos (Fase I)"),
+            unsafe_allow_html=True,
+        )
 
-    if not st.session_state["df_manual_ok"]:
-        st.markdown(render_alarm("info", (
-            "<strong>📋 Instrucciones</strong><br><br>"
-            "1. Configura el número de subgrupos y el tamaño de muestra <strong>n</strong><br>"
-            "2. Completa todos los valores de peso en la tabla (kg)<br>"
-            "3. Pulsa <strong>💾 Guardar datos iniciales</strong> para activar el análisis<br><br>"
-            "<strong>Límites activos:</strong> LIE = 39.5 kg · LSE = 40.5 kg · Nominal = 40.0 kg"
-        )), unsafe_allow_html=True)
+        if not st.session_state["df_manual_ok"]:
+            st.markdown(render_alarm("info", (
+                "<strong>📋 Instrucciones</strong><br><br>"
+                "1. Configura el número de subgrupos y el tamaño de muestra <strong>n</strong><br>"
+                "2. Completa todos los valores de peso en la tabla (kg)<br>"
+                "3. Pulsa <strong>💾 Guardar datos iniciales</strong> para activar el análisis<br><br>"
+                "<strong>Límites activos:</strong> LIE = 39.5 kg · LSE = 40.5 kg · Nominal = 40.0 kg"
+            )), unsafe_allow_html=True)
 
-    # ── Controles de estructura ───────────────────────────────────────────────
-    _mc_a, _mc_b = st.columns([1, 1])
-    with _mc_a:
-        _man_nsg = st.number_input("Nº de subgrupos (filas)", min_value=2, max_value=100,
-                                   value=20, key="man_nsg")
-    with _mc_b:
-        _man_n = st.number_input("Tamaño de muestra n (columnas X)", min_value=2, max_value=10,
-                                 value=5, key="man_n")
+        # ── Controles de estructura ───────────────────────────────────────────────
+        _mc_a, _mc_b = st.columns([1, 1])
+        with _mc_a:
+            _man_nsg = st.number_input("Nº de subgrupos (filas)", min_value=2, max_value=100,
+                                       value=20, key="man_nsg")
+        with _mc_b:
+            _man_n = st.number_input("Tamaño de muestra n (columnas X)", min_value=2, max_value=10,
+                                     value=5, key="man_n")
 
-    _man_xcols = [f"X{i+1}" for i in range(int(_man_n))]
+        _man_xcols = [f"X{i+1}" for i in range(int(_man_n))]
 
-    # ── Inicializar / redimensionar tabla en session_state ────────────────────
-    _man_key = f"man_df_{int(_man_nsg)}_{int(_man_n)}"
-    if st.session_state.get("man_table_key") != _man_key:
-        _man_data = {"Subgrupo": list(range(1, int(_man_nsg)+1)),
-                     "Hora":     [""] * int(_man_nsg)}
-        for xc in _man_xcols:
-            _man_data[xc] = [np.nan] * int(_man_nsg)
-        st.session_state["man_df_edit"]   = pd.DataFrame(_man_data)
-        st.session_state["man_table_key"] = _man_key
-        st.session_state.pop(f"man_editor_{_man_key}", None)
-
-    # ── Tabla editable ────────────────────────────────────────────────────────
-    st.markdown(f"**Ingresa los pesos (kg) — {int(_man_nsg)} subgrupos × n={int(_man_n)}:**")
-    _man_edited = st.data_editor(
-        st.session_state["man_df_edit"],
-        width="stretch",
-        num_rows="fixed",
-        column_config={
-            "Subgrupo": st.column_config.NumberColumn("Subgrupo", disabled=True),
-            "Hora":     st.column_config.TextColumn("Hora"),
-            **{xc: st.column_config.NumberColumn(
-                xc, format="%.3f", step=0.001)
-               for xc in _man_xcols}
-        },
-        key=f"man_editor_{_man_key}"
-    )
-
-    # ── Botón guardar ─────────────────────────────────────────────────────────
-    if st.button("💾 Guardar datos iniciales", type="primary", key="btn_man_guardar"):
-        _df_check = _man_edited[_man_xcols].apply(pd.to_numeric, errors="coerce")
-        _n_nulls  = _df_check.isnull().any(axis=1).sum()
-        if _n_nulls > 0:
-            st.warning(f"⚠ {_n_nulls} subgrupo(s) tienen celdas vacías. "
-                       "Completa todos los valores antes de guardar.")
-        elif len(_df_check.dropna()) < 2:
-            st.warning("⚠ Se necesitan al menos 2 subgrupos completos.")
-        else:
-            _df_save = _man_edited.copy()
+        # ── Inicializar / redimensionar tabla en session_state ────────────────────
+        _man_key = f"man_df_{int(_man_nsg)}_{int(_man_n)}"
+        if st.session_state.get("man_table_key") != _man_key:
+            _man_data = {"Subgrupo": list(range(1, int(_man_nsg)+1)),
+                         "Hora":     [""] * int(_man_nsg)}
             for xc in _man_xcols:
-                _df_save[xc] = pd.to_numeric(_df_save[xc], errors="coerce")
-            _df_save = _df_save.dropna(subset=_man_xcols, how="any").reset_index(drop=True)
-            st.session_state["df_manual_raw"] = _df_save
-            st.session_state["df_manual_ok"]  = True
+                _man_data[xc] = [np.nan] * int(_man_nsg)
+            st.session_state["man_df_edit"]   = pd.DataFrame(_man_data)
+            st.session_state["man_table_key"] = _man_key
+            st.session_state.pop(f"man_editor_{_man_key}", None)
 
-        st.stop()
+        # ── Tabla editable ────────────────────────────────────────────────────────
+        st.markdown(f"**Ingresa los pesos (kg) — {int(_man_nsg)} subgrupos × n={int(_man_n)}:**")
+        _man_edited = st.data_editor(
+            st.session_state["man_df_edit"],
+            width="stretch",
+            num_rows="fixed",
+            column_config={
+                "Subgrupo": st.column_config.NumberColumn("Subgrupo", disabled=True),
+                "Hora":     st.column_config.TextColumn("Hora"),
+                **{xc: st.column_config.NumberColumn(
+                    xc, format="%.3f", step=0.001)
+                   for xc in _man_xcols}
+            },
+            key=f"man_editor_{_man_key}"
+        )
+
+        # ── Botón guardar ─────────────────────────────────────────────────────────
+        if st.button("💾 Guardar datos iniciales", type="primary", key="btn_man_guardar"):
+            _df_check = _man_edited[_man_xcols].apply(pd.to_numeric, errors="coerce")
+            _n_nulls  = _df_check.isnull().any(axis=1).sum()
+            if _n_nulls > 0:
+                _sg_inv = (_df_check.isnull().any(axis=1)).to_numpy().nonzero()[0] + 1
+                _sg_str = ", ".join(str(i) for i in _sg_inv[:8])
+                _sg_ext = f" (y {len(_sg_inv)-8} más)" if len(_sg_inv) > 8 else ""
+                st.warning(
+                    f"⚠ {_n_nulls} subgrupo(s) contienen datos no numéricos o vacíos: "
+                    f"subgrupos {_sg_str}{_sg_ext}. "
+                    "Corrige los valores antes de guardar."
+                )
+            elif len(_df_check.dropna()) < 2:
+                st.warning("⚠ Se necesitan al menos 2 subgrupos completos.")
+            else:
+                _df_save = _man_edited.copy()
+                for xc in _man_xcols:
+                    _df_save[xc] = pd.to_numeric(_df_save[xc], errors="coerce")
+                _df_save = _df_save.dropna(subset=_man_xcols, how="any").reset_index(drop=True)
+                st.session_state["df_manual_raw"] = _df_save
+                st.session_state["df_manual_ok"]  = True
+
+            st.stop()
 
     # Datos confirmados → construir df_raw / n / x_cols / s idénticos al flujo Excel
     _proc_ok = False
@@ -512,6 +530,270 @@ if "pagina" not in st.session_state:
     st.session_state["pagina"] = "capacidad"
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# EXPORTACIÓN HTML — reporte completo descargable
+# ─────────────────────────────────────────────────────────────────────────────
+
+def generate_full_html_report() -> str:
+    """Genera un reporte HTML completo con los resultados ya calculados en s y session_state."""
+    import datetime
+    ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    lsl_r  = st.session_state["cap_lsl"]
+    usl_r  = st.session_state["cap_usl"]
+    nom_r  = st.session_state["cap_nominal"]
+    xb     = s["xbar_bar"]
+    sig    = s["sigma_st"]
+    r_bar  = s["R_bar"]
+    n_sg   = s["n"]
+    k_sg   = len(s["df"])
+    Cp     = s["Cp"]
+    Cpl    = s["Cpl"]
+    Cpu    = s["Cpu"]
+    Cpk    = s["Cpk"]
+    pnc_l  = s["pnc_low"]  * 100
+    pnc_h  = s["pnc_high"] * 100
+    pnc_t  = s["pnc_total"]* 100
+    UCLx   = s["UCL_x"]
+    LCLx   = s["LCL_x"]
+    UCLr   = s["UCL_r"]
+    LCLr   = s["LCL_r"]
+    sw     = s.get("sw", {})
+    sx_    = s.get("signals_x", [])
+    sr_    = s.get("signals_r", [])
+
+    over_g = max(0.0, xb - nom_r) * 1000
+    und_g  = min(0.0, xb - nom_r) * 1000
+    sacos_mes = (st.session_state["eco_prod_h"]
+                 * st.session_state["eco_hours_day"]
+                 * st.session_state["eco_days_month"])
+    over_kg   = max(0.0, xb - nom_r) * sacos_mes
+    costo_mes = over_kg * st.session_state["eco_cost_kg"]
+    costo_anio= costo_mes * 12
+    sacos_ext = (over_kg * 12 / 40) if over_g > 0 else 0.0
+
+    # Capacidad semáforo
+    def cpk_badge_txt(v):
+        if v >= 1.33: return "#27AE60", "CAPAZ"
+        if v >= 1.0:  return "#F39C12", "MARGINAL"
+        return "#E74C3C", "INCAPAZ"
+    cpk_col, cpk_lbl = cpk_badge_txt(Cpk)
+
+    # Shapiro-Wilk
+    sw_txt = ""
+    if sw.get("W"):
+        sw_normal = sw.get("normal", False)
+        sw_txt = (f"W = {sw['W']:.5f} | p = {sw['p']:.5f} | "
+                  + ("✅ Normalidad confirmada" if sw_normal else "⚠ Posible no normalidad"))
+
+    # Alarmas CEP
+    cx_ok  = "✅ Sin puntos fuera de control"    if not sx_ else f"❌ {len(sx_)} subgrupo(s) fuera de LCx"
+    cr_ok  = "✅ Variabilidad bajo control"       if not sr_ else f"❌ {len(sr_)} subgrupo(s) fuera de LCr"
+
+    # Monitoreo
+    bloques = st.session_state.get("mon_bloques", [])
+    mon_txt = f"{len(bloques)} bloque(s) de monitoreo registrados." if bloques else "Sin datos de monitoreo en esta sesión."
+
+    # Plan de muestreo
+    n_prop = st.session_state.get("n_proposed_val", n_sg)
+    freq   = st.session_state.get("freq_min_val", 20)
+
+    # μ* económico
+    eco_lote  = st.session_state.get("eco_lote", 200)
+    eco_p     = st.session_state.get("eco_p_rechazo", 0.10)
+    eco_p_dec = eco_p / 100.0
+    z_opt_r   = float(stats.norm.ppf(1.0 - eco_p_dec)) if eco_p_dec > 0 else 3.09
+    se_lote_r = sig / float(np.sqrt(max(eco_lote, 1)))
+    mu_star_r = nom_r + z_opt_r * se_lote_r
+    mu_star_r = float(np.clip(mu_star_r, nom_r, max(xb, nom_r + 1e-6)))
+    des_opt_g = (mu_star_r - nom_r) * 1000
+    over_opt_kg = max(0.0, mu_star_r - nom_r) * sacos_mes
+    costo_opt_mes = over_opt_kg * st.session_state["eco_cost_kg"]
+    costo_opt_anio = costo_opt_mes * 12
+    ahorro_anio = costo_anio - costo_opt_anio
+
+    # ── CSS inline ────────────────────────────────────────────────────────────
+    css = """
+    body{font-family:'Segoe UI',Arial,sans-serif;margin:0;padding:0;background:#F4F6F7;color:#2C3E50}
+    .page{max-width:960px;margin:0 auto;padding:2rem 1.5rem}
+    h1{font-size:1.5rem;color:#1B4F72;border-bottom:3px solid #1B4F72;padding-bottom:.4rem;margin-bottom:.2rem}
+    h2{font-size:1.1rem;color:#1B4F72;margin:1.6rem 0 .5rem;border-left:4px solid #2E86C1;padding-left:.6rem}
+    h3{font-size:.95rem;color:#2E86C1;margin:.8rem 0 .3rem}
+    .sub{font-size:.75rem;color:#7F8C8D;margin-bottom:1rem}
+    .kpi-row{display:flex;gap:.8rem;flex-wrap:wrap;margin:.6rem 0 1rem}
+    .kpi{background:white;border-radius:8px;padding:.7rem 1rem;min-width:130px;
+         box-shadow:0 1px 4px rgba(0,0,0,.1);flex:1;text-align:center}
+    .kval{font-size:1.4rem;font-weight:700}
+    .klbl{font-size:.7rem;color:#7F8C8D;margin-top:.2rem}
+    table{width:100%;border-collapse:collapse;font-size:.82rem;margin:.5rem 0 1rem;background:white;
+          border-radius:6px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.08)}
+    th{background:#1B4F72;color:white;padding:.45rem .7rem;text-align:left}
+    td{padding:.4rem .7rem;border-bottom:1px solid #EBF5FB}
+    tr:last-child td{border:none}
+    .ok{color:#27AE60;font-weight:600}
+    .warn{color:#F39C12;font-weight:600}
+    .bad{color:#E74C3C;font-weight:600}
+    .tag{display:inline-block;padding:.15rem .5rem;border-radius:4px;font-size:.7rem;font-weight:700;color:white}
+    footer{text-align:center;font-size:.7rem;color:#95A5A6;margin-top:2rem;padding-top:1rem;border-top:1px solid #D5DBDB}
+    @media print{body{background:white}.page{padding:1rem}}
+    """
+
+    def kpi(val, lbl, color="#2E86C1"):
+        return f'<div class="kpi"><div class="kval" style="color:{color}">{val}</div><div class="klbl">{lbl}</div></div>'
+
+    def row(*cells):
+        return "<tr>" + "".join(f"<td>{c}</td>" for c in cells) + "</tr>"
+
+    def thead(*cells):
+        return "<thead><tr>" + "".join(f"<th>{c}</th>" for c in cells) + "</tr></thead>"
+
+    # ── Construcción del HTML ─────────────────────────────────────────────────
+    html = f"""<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Reporte CEP — Molinos Santa Marta S.A.S.</title>
+<style>{css}</style>
+</head>
+<body>
+<div class="page">
+
+<h1>📊 Reporte CEP — Línea de Empaque de Mogolla</h1>
+<p class="sub">Molinos Santa Marta S.A.S. &nbsp;·&nbsp; Generado: {ts} &nbsp;·&nbsp;
+LSL = {lsl_r:.2f} kg &nbsp;·&nbsp; USL = {usl_r:.2f} kg &nbsp;·&nbsp; Nominal = {nom_r:.2f} kg</p>
+
+<!-- ════ CAPACIDAD ════ -->
+<h2>1. Capacidad del Proceso</h2>
+<div class="kpi-row">
+  {kpi(f"{xb:.4f} kg", "x̄ — Media")}
+  {kpi(f"{sig:.4f} kg", "σ — Desv. estándar")}
+  {kpi(f"{r_bar:.4f} kg", "R̄ — Rango promedio")}
+  {kpi(str(n_sg), "n — Tamaño subgrupo")}
+  {kpi(str(k_sg), "k — Subgrupos")}
+  {kpi(f"{pnc_t:.3f}%", "p̂NC — Prop. No Conforme")}
+</div>
+<table>
+  {thead("Índice", "Valor", "Interpretación")}
+  <tbody>
+    {row("Cp",  f"{Cp:.4f}",  ("✅ Proceso centrado" if Cp>=1.33 else "⚠ Margen ajustado" if Cp>=1.0 else "❌ Capacidad insuficiente"))}
+    {row("Cpl", f"{Cpl:.4f}", "Capacidad respecto a LSL")}
+    {row("Cpu", f"{Cpu:.4f}", "Capacidad respecto a USL")}
+    {row('<strong>Cpk</strong>', f'<strong style="color:{cpk_col}">{Cpk:.4f}</strong>',
+         f'<span class="tag" style="background:{cpk_col}">{cpk_lbl}</span>')}
+    {row("% NC bajo LSL", f"{pnc_l:.4f}%", "Proporción bajo límite inferior")}
+    {row("% NC sobre USL", f"{pnc_h:.4f}%", "Proporción sobre límite superior")}
+  </tbody>
+</table>
+{"<p><strong>Shapiro-Wilk:</strong> " + sw_txt + "</p>" if sw_txt else ""}
+
+<!-- ════ CARTAS CEP ════ -->
+<h2>2. Cartas de Control — Fase I</h2>
+<table>
+  {thead("Carta", "LCI", "Línea Central", "LCS", "Estado")}
+  <tbody>
+    {row("X̄", f"{LCLx:.4f} kg", f"{xb:.4f} kg", f"{UCLx:.4f} kg",
+         f'<span class="ok">{cx_ok}</span>' if not sx_ else f'<span class="bad">{cx_ok}</span>')}
+    {row("R", f"{LCLr:.4f} kg", f"{r_bar:.4f} kg", f"{UCLr:.4f} kg",
+         f'<span class="ok">{cr_ok}</span>' if not sr_ else f'<span class="bad">{cr_ok}</span>')}
+  </tbody>
+</table>
+
+<!-- ════ DIAGNÓSTICO ════ -->
+<h2>3. Diagnóstico del Proceso</h2>
+<table>
+  {thead("Indicador", "Estado")}
+  <tbody>
+    {row("Control estadístico X̄", '<span class="ok">✅ Bajo control</span>' if not sx_ else f'<span class="bad">❌ {len(sx_)} señal(es)</span>')}
+    {row("Control estadístico R", '<span class="ok">✅ Bajo control</span>' if not sr_ else f'<span class="bad">❌ {len(sr_)} señal(es)</span>')}
+    {row("Capacidad (Cpk ≥ 1.33)", f'<span class="{"ok" if Cpk>=1.33 else "warn" if Cpk>=1.0 else "bad"}">{cpk_lbl} ({Cpk:.3f})</span>')}
+    {row("Sobrellenado", f'<span class="warn">+{over_g:.1f} g/saco</span>' if over_g > 0 else '<span class="ok">Sin sobrellenado</span>')}
+    {row("Subllenado", f'<span class="bad">{und_g:.1f} g/saco</span>' if und_g < 0 else '<span class="ok">Sin subllenado</span>')}
+    {row("Normalidad", ('<span class="ok">Confirmada</span>' if sw.get("normal") else '<span class="warn">Posible no normalidad</span>') if sw.get("W") else "—")}
+  </tbody>
+</table>
+
+<!-- ════ POTENCIA ════ -->
+<h2>4. Análisis de Potencia</h2>
+<table>
+  {thead("Parámetro", "Valor")}
+  <tbody>
+    {row("σ proceso estimada", f"{sig:.4f} kg")}
+    {row("n subgrupo recomendado", str(n_prop))}
+    {row("Desplazamiento detectable (1σ)", f"{sig:.4f} kg")}
+    {row("Desplazamiento detectable (2σ)", f"{2*sig:.4f} kg")}
+    {row("Frecuencia de muestreo sugerida", f"cada {freq} min")}
+  </tbody>
+</table>
+
+<!-- ════ MONITOREO ════ -->
+<h2>5. Monitoreo en Tiempo Real — Fase II</h2>
+<p>{mon_txt}</p>
+{"".join(_mon_bloque_html(b) for b in bloques[:5]) if bloques else ""}
+
+<!-- ════ PLAN DE MUESTREO ════ -->
+<h2>6. Plan de Muestreo Propuesto</h2>
+<table>
+  {thead("Parámetro", "Valor")}
+  <tbody>
+    {row("Tamaño de muestra (n)", str(n_prop))}
+    {row("Frecuencia de muestreo", f"cada {freq} minutos")}
+    {row("Límite inferior de control (LCI X̄)", f"{LCLx:.4f} kg")}
+    {row("Límite superior de control (LCS X̄)", f"{UCLx:.4f} kg")}
+    {row("LSL", f"{lsl_r:.4f} kg")}
+    {row("USL", f"{usl_r:.4f} kg")}
+  </tbody>
+</table>
+
+<!-- ════ ANÁLISIS ECONÓMICO ════ -->
+<h2>7. Análisis Económico del Sobrellenado</h2>
+<div class="kpi-row">
+  {kpi(f"+{over_g:.1f} g", "Sobrellenado/saco", "#F39C12" if over_g>0 else "#27AE60")}
+  {kpi(f"${costo_mes:,.0f}", "Pérdida mensual (COP)", "#E74C3C")}
+  {kpi(f"${costo_anio:,.0f}", "Pérdida anual (COP)", "#E74C3C")}
+  {kpi(f"{sacos_ext:.0f}", "Sacos extra/año", "#E74C3C")}
+</div>
+<table>
+  {thead("Escenario", "Media (kg)", "Exceso/saco (g)", "Costo mensual (COP)", "Costo anual (COP)")}
+  <tbody>
+    {row('<span class="warn">⚠ Actual</span>', f"{xb:.4f}", f"+{over_g:.1f}", f"${costo_mes:,.0f}", f"${costo_anio:,.0f}")}
+    {row('<span class="ok">✅ Óptimo (μ*)</span>', f"{mu_star_r:.4f}", f"+{des_opt_g:.1f}", f"${costo_opt_mes:,.0f}", f"${costo_opt_anio:,.0f}")}
+    {row('<strong>💰 Ahorro</strong>', "—", f"{over_g-des_opt_g:.1f} g menos", f"${costo_mes-costo_opt_mes:,.0f}", f'<strong style="color:#27AE60">${ahorro_anio:,.0f}</strong>')}
+  </tbody>
+</table>
+<p style="font-size:.82rem;color:#566573">
+<strong>Interpretación:</strong> Con μ* = {mu_star_r:.4f} kg (+{des_opt_g:.1f} g sobre nominal),
+la probabilidad de rechazo del lote de {eco_lote} sacos se mantiene ≤ {eco_p:.3f}%.
+Esto representa un ahorro estimado de <strong>${ahorro_anio:,.0f} COP/año</strong>.
+</p>
+
+<footer>Reporte generado por CEP v2.1 · Molinos Santa Marta S.A.S. · {ts}</footer>
+</div>
+</body>
+</html>"""
+    return html
+
+
+def _mon_bloque_html(b: dict) -> str:
+    """Genera una tabla HTML resumida para un bloque de monitoreo."""
+    df_p = b.get("_df_proc")
+    if df_p is None or len(df_p) == 0:
+        return f"<p style='font-size:.8rem'>Bloque {b['bid']}: sin datos procesados.</p>"
+    n_new   = b.get("n_new", 0)
+    signals = b.get("new_signals", [])
+    sig_txt = (f'<span class="ok">Sin señales</span>' if not signals
+               else f'<span class="bad">⚠ {len(signals)} señal(es) detectada(s)</span>')
+    return f"""
+<h3>Bloque {b['bid']} — {n_new} subgrupo(s) nuevos · {sig_txt}</h3>
+<table>
+  <thead><tr><th>Subgrupo</th><th>x̄</th><th>R</th></tr></thead>
+  <tbody>
+    {"".join(f"<tr><td>{i+1}</td><td>{row['xbar']:.4f}</td><td>{row['R']:.4f}</td></tr>"
+             for i, row in df_p.head(10).iterrows())}
+  </tbody>
+</table>"""
+
+
 def render_sidebar():
     """Construye el menú lateral de navegación SPA."""
     with st.sidebar:
@@ -542,8 +824,20 @@ def render_sidebar():
                     # No st.rerun() — Streamlit re-renders automatically on session_state change
 
         st.markdown("---")
+        try:
+            _html_rep = generate_full_html_report()
+            st.download_button(
+                label="📥 Exportar Reporte HTML",
+                data=_html_rep.encode("utf-8"),
+                file_name="reporte_CEP_molinos.html",
+                mime="text/html",
+                use_container_width=True,
+                help="Descarga un reporte HTML completo con todos los resultados del análisis",
+            )
+        except Exception:
+            pass  # Si aún no hay datos, el botón no aparece sin romper la app
         st.markdown(
-            '<div style="font-size:.7rem;color:#95A5A6;text-align:center">'
+            '<div style="font-size:.7rem;color:#95A5A6;text-align:center;margin-top:.4rem">'
             'v2.1 · Molinos Santa Marta S.A.S.</div>',
             unsafe_allow_html=True
         )
@@ -626,12 +920,12 @@ def page_capacidad():
     st.markdown(render_section_title("📐 Estadísticos del Proceso"), unsafe_allow_html=True)
     sc1, sc2, sc3, sc4, sc5, sc6 = st.columns(6)
     for col, lbl, val in [
-        (sc1, "x̄  (Media del proceso)",    f"{s_cap['xbar_bar']:.4f} kg"),
-        (sc2, "σ proceso  (R̄/d₂)",   f"{s_cap['sigma_st']:.4f} kg"),
-        (sc3, "R promedio",          f"{s_cap['R_bar']:.4f} kg"),
-        (sc4, "n",            str(s_cap["n"])),
-        (sc5, "Subgrupos",    str(len(s_cap["df"]))),
-        (sc6, "PNC total",    f"{_pnc_tot*100:.3f}%"),
+        (sc1, "x̄ — Media del proceso",       f"{s_cap['xbar_bar']:.4f} kg"),
+        (sc2, "σ — Desv. estándar",           f"{s_cap['sigma_st']:.4f} kg"),
+        (sc3, "R̄ — Rango promedio",           f"{s_cap['R_bar']:.4f} kg"),
+        (sc4, "n — Tamaño subgrupo",          str(s_cap["n"])),
+        (sc5, "k — Nº subgrupos",             str(len(s_cap["df"]))),
+        (sc6, "p̂NC — Prop. No Conforme",      f"{_pnc_tot*100:.3f}%"),
     ]:
         with col: st.metric(lbl, val)
 
@@ -831,8 +1125,9 @@ def page_capacidad():
     st.markdown("<br>", unsafe_allow_html=True)
     _kpi_nominal_cap = st.session_state["cap_nominal"]
     _kpi_over_g_cap  = max(0.0, s_cap["xbar_bar"] - _kpi_nominal_cap) * 1000
+    _kpi_under_g_cap = min(0.0, s_cap["xbar_bar"] - _kpi_nominal_cap) * 1000  # negativo si hay subllenado
 
-    k1, k2, k3 = st.columns(3)
+    k1, k2, k3, k4 = st.columns(4)
 
     bord = "red" if _Cpk < 1.0 else "yellow" if _Cpk < 1.33 else "green"
     with k1:
@@ -858,6 +1153,20 @@ def page_capacidad():
         <div class="kpi-label">Sobrellenado promedio</div>
         <div class="kpi-sub">Media = {s_cap['xbar_bar']:.4f} kg &nbsp;·&nbsp; Ver costos en 💰 Análisis Económico</div></div>""",
         unsafe_allow_html=True)
+
+    with k4:
+        if _kpi_under_g_cap < 0:
+            st.markdown(f"""<div class="kpi-card red">
+            <div class="kpi-value" style="color:{CR}">{_kpi_under_g_cap:.1f} g</div>
+            <div class="kpi-label">Subllenado promedio</div>
+            <div class="kpi-sub">⚠ Media bajo nominal: {s_cap['xbar_bar']:.4f} kg</div></div>""",
+            unsafe_allow_html=True)
+        else:
+            st.markdown(f"""<div class="kpi-card green">
+            <div class="kpi-value" style="color:{CG}; font-size:1rem">✅ Sin subllenado</div>
+            <div class="kpi-label">Subllenado promedio</div>
+            <div class="kpi-sub">Media ≥ nominal ({_kpi_nominal_cap:.1f} kg)</div></div>""",
+            unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
 
