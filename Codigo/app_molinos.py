@@ -2750,8 +2750,8 @@ def page_eco_analisis():
          border-left:5px solid #F1C40F;font-size:.88rem;line-height:1.55">
     <strong style="font-size:.95rem">¿Cuál es la menor media que evita el rechazo del lote?</strong><br><br>
     La empresa sobrellenar por seguridad estadística. Sin embargo, existe una media mínima μ*
-    tal que la probabilidad de que el promedio del lote caiga bajo el LSL sea prácticamente nula.
-    Operar en μ* reduce las pérdidas sin comprometer la conformidad del producto.
+    tal que la probabilidad de que el promedio del lote caiga bajo el Nominal (40 kg) sea prácticamente nula.
+    Operar en μ* reduce las pérdidas sin comprometer el peso comprometido con el cliente.
     </div>
     """, unsafe_allow_html=True)
 
@@ -2763,7 +2763,7 @@ def page_eco_analisis():
     st.markdown(render_alarm("info",
         "<strong>Ingresa los parámetros de simulación:</strong> tamaño del lote y probabilidad máxima de rechazo "
         "tolerable. El sistema calculará la media mínima μ* que mantiene ese riesgo usando "
-        "<code>μ* = LSL + z(1−p) · σ/√n_lote</code>. "
+        "<code>μ* = Nominal + z(1−p) · σ/√n_lote</code>. "
         "Con valores pequeños de p (ej. 0.100%) se garantiza un margen estadístico robusto."
     ), unsafe_allow_html=True)
 
@@ -2783,17 +2783,17 @@ def page_eco_analisis():
             value=float(st.session_state["eco_p_rechazo"]),
             step=0.001, format="%.3f",
             key="eco_input_p",
-            help="P(x̄_lote < LSL) tolerable. Ejemplo: 0.100 = 0.1 %"
+            help="P(x̄_lote < Nominal) tolerable. Ejemplo: 0.100 = 0.1 %"
         )
 
     _lote     = int(st.session_state["eco_lote"])
     _p_rec    = st.session_state["eco_p_rechazo"] / 100.0   # proporción
     _se_lote  = _sig / np.sqrt(_lote)                        # SE del promedio del lote
     _z_opt    = stats.norm.ppf(1.0 - _p_rec)                 # z tal que P(Z>z) = p_rechazo
-    _mu_opt   = _LSL + _z_opt * _se_lote                      # media óptima
+    _mu_opt   = _NOMINAL + _z_opt * _se_lote                   # media óptima: base Nominal, no LSL
 
-    # μ* ∈ [LSL, x̄] — no menor al límite técnico, no mayor a la media actual
-    _mu_opt = float(np.clip(_mu_opt, _LSL, max(_xb, _LSL + 1e-6)))
+    # μ* ∈ [Nominal, x̄] — el cliente exige ≥ nominal, así que no proponemos bajar de ahí
+    _mu_opt = float(np.clip(_mu_opt, _NOMINAL, max(_xb, _NOMINAL + 1e-6)))
 
     # Capacidad con media óptima
     _Cpk_opt = min((_USL - _mu_opt) / (3*_sig), (_mu_opt - _LSL) / (3*_sig))
